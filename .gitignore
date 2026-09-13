@@ -1,0 +1,13 @@
+# Never commit credentials or user data
+database/config.php
+dumps/
+uploads/
+*.sql
+*.log
+*.txt
+
+# Dev tooling
+vendor/
+composer.lock
+.idea/
+.vscode/

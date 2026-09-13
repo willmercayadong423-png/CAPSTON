@@ -1,0 +1,10 @@
+RewriteEngine On
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteRule ^([^\.]+)$ $1.php [NC,L]
+
+Options -Indexes
+
+# Block direct download of sensitive non-web files (config, schema, dumps)
+<FilesMatch "\.(sql|txt|json|lock|md|ini|log|env)$">
+    Require all denied
+</FilesMatch>

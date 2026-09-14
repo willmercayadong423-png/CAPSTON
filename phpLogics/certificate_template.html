@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<!-- ═══════════════════════════════════════════════════════════════════
+     HEHMS e-CERTIFICATE TEMPLATE  (phpLogics/certificate_template.html)
+     Design: SIMPLE / CLASSIC — plain white, centered letterhead, no
+     decorative borders, plain black serif text.
+     ═══════════════════════════════════════════════════════════════════
+     EDIT THIS FILE to change the certificate LOOK:
+       • logo placement, fonts, colors, borders
+       • letterhead text (Region, Division, School name, address)
+       • text sizes and positioning
+
+     HOW:
+       1. Open this file in a text editor (VS Code / Notepad++)
+       2. Edit the CSS below the "STYLE" banner and/or the HTML below
+          the "LAYOUT" banner
+       3. Save, then click "🔄 Refresh Preview" in the release modal
+          (or reopen the modal) — changes apply immediately.
+
+     RULES — do not remove these tokens (the system fills them in):
+       {{LOGO_IMG}}       → the school logo <img> tag
+       {{TITLE}}          → certificate title (e.g. CERTIFICATE OF GOOD MORAL)
+       {{BODY}}           → certificate body text (name, SY, etc. inside)
+       {{REMARKS}}        → optional remarks block (may be empty)
+       {{ISSUED_LINE}}    → "Given this 24th of June 2022, at ..."
+       {{REQ_NO}}         → request reference number
+       {{OFFICER_NAME}}   → signatory name
+       {{OFFICER_TITLE}}  → signatory position
+     ═══════════════════════════════════════════════════════════════════ -->
+<html>
+<head>
+<meta charset="utf-8">
+
+<!-- ═════════════════════════ STYLE — edit freely ═════════════════════ -->
+<style>
+    @page { size: 297mm 210mm; margin: 0; }   /* page = A4 LANDSCAPE */
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: "DejaVu Serif", serif; color: #000; }
+
+    .page { width: 297mm; height: 210mm; position: relative; background: #ffffff; }
+
+    /* Border frame — inset so nothing clips at the page edge.
+         Double line → change `double` to `solid` for a single line. */
+    .b-frame { position: absolute; top: 3mm; left: 3mm; right: 3mm; bottom: 3mm; border: 3px double #000; }
+
+    /* Content area — everything sits inside this box.
+       Increase `top` to push content down; `left/right` to narrow it. */
+    .content { position: absolute; top: 14mm; left: 30mm; right: 30mm; bottom: 14mm; }
+
+    /* ── Letterhead — logo CENTERED above the text, all lines centered ──
+         Logo bigger/smaller: change the width/height (keep equal).
+         Logo back on the left: use
+           .cert-logo { position:absolute; left:0; top:2mm; width:19mm; height:19mm; } */
+    .head-wrap { text-align: center; }
+    .cert-logo { display: block; margin: 0 auto 2.5mm; width: 18mm; height: 18mm; }
+    .gov  { font-size: 10pt; }
+    .dept { font-size: 11pt; font-weight: bold; }
+    .region { font-size: 10pt; }
+    .division { font-size: 10pt; font-weight: bold; }
+    .district { font-size: 10pt; }
+    .school { font-size: 13.5pt; font-weight: bold; margin-top: 1mm; }
+    .addr { font-size: 9.5pt; font-style: italic; margin-top: .8mm; }
+
+    /* ── Certificate title ── */
+    .cert-title { font-size: 16pt; font-weight: bold; margin-top: 7mm; letter-spacing: 2px; text-align: center; text-decoration: underline; }
+
+    /* ── Body ── */
+    .cert-to-whom { font-size: 10.5pt; margin-top: 6mm; text-align: left; }
+    .cert-body { font-size: 10.5pt; line-height: 1.8; text-align: justify; margin-top: 4mm; }
+    .cert-name { font-size: 12.5pt; font-weight: bold; }
+    .cert-remarks { font-size: 10pt; line-height: 1.7; text-align: justify; margin-top: 4mm; font-style: italic; }
+
+    /* ── Footer — anchored from the TOP (dompdf mishandles bottom-anchored
+         absolute boxes and pushes them off-page). The "Given this…" date line
+         was removed: the issue date already appears inside the body text.
+         Signature sits LEFT, Reference No. sits RIGHT. ── */
+    .foot { position: absolute; top: 150mm; left: 0; right: 0; }
+    .foot table { width: 100%; border-collapse: collapse; }
+    .foot td { vertical-align: top; padding: 0; }
+    .td-sig { width: 45%; text-align: center; }
+    .td-ref { width: 55%; text-align: right; font-size: 9pt; color: #555; }
+    .sig-line { width: 65mm; border-top: 1px solid #000; margin: 0 auto 2mm; }
+    .sig-name { font-size: 10.5pt; font-weight: bold; color: #000; }
+    .sig-title { font-size: 9.5pt; color: #000; }
+    .ref-note { position: absolute; top: 176mm; left: 0; right: 0; text-align: center; font-size: 7pt; color: #999; }
+
+    /* Border is drawn by .b-frame above — edit its border rule to restyle:
+       Single thin:  border: 1px solid #000;
+       Single bold:  border: 2px solid #000;   */
+</style>
+</head>
+
+<!-- ═══════════════════════ LAYOUT — edit freely ══════════════════════ -->
+<body>
+    <div class="page">
+        <div class="b-frame"></div>
+        <div class="content">
+
+            <!-- Letterhead — edit the text lines directly if ever needed -->
+            <div class="head-wrap">
+                {{LOGO_IMG}}
+                <div class="gov">Republic of the Philippines</div>
+                <div class="dept">Department of Education</div>
+                <div class="region">Region III</div>
+                <div class="division">Schools Division of Nueva Ecija</div>
+                <div class="district">Laur 3rd District</div>
+                <div class="school">HILARIO E. HERMOSA MEMORIAL HIGH SCHOOL</div>
+                <div class="addr">Siclong, Laur, Nueva Ecija</div>
+            </div>
+
+            <!-- Title -->
+            <div class="cert-title">{{TITLE}}</div>
+
+            <!-- Body -->
+            <div class="cert-to-whom">To whom it may concern:</div>
+            <div class="cert-body">{{BODY}}</div>
+            
+            {{REMARKS}}
+
+            <!-- Footer: signature LEFT, Reference No. RIGHT (no "Given this…"
+                 line — the date is already in the body text) -->
+            <div class="foot">
+                <table>
+                    <tr>
+                        <td class="td-sig">
+                            <div class="sig-line"></div>
+                            <div class="sig-name">{{OFFICER_NAME}}</div>
+                            <div class="sig-title">{{OFFICER_TITLE}}</div>
+                        </td>
+                        <td class="td-ref">
+                            Reference No.: {{REQ_NO}}
+                        </td>
+                    </tr>
+                </table>
+            </div>
+            <!-- System note — direct child of .content (anchors to content, not to .foot) -->
+            <div class="ref-note">This certificate is system-generated by the HEHMS Credential Request &amp; Tracking System.</div>
+
+        </div>
+    </div>
+</body>
+</html>

@@ -8,6 +8,6 @@ uploads/
 
 # Dev tooling
 vendor/
-composer.lock
+composer.phar
 .idea/
 .vscode/

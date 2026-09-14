@@ -7,20 +7,27 @@
 
 
 
-require("phpLogics/auth.php");
-include("database/db.php");
+require __DIR__ . "/../phpLogics/auth.php";
+include(__DIR__ . "/../database/db.php");
+include __DIR__ . "/../phpLogics/site_config.php";
+require_once __DIR__ . "/../phpLogics/mailer.php";
 
 
 header("X-Content-Type-Options: nosniff");
 header("X-Frame-Options: DENY");
 header("Referrer-Policy: strict-origin-when-cross-origin");
 
-if (strtolower($_SESSION['role']) !== 'student') {
-    header("Location: registrarMainPage.php");
-    exit();
-}
+require_role('student');
 
 $student_id = $_SESSION['user_id'];
+
+// ── Path anchors ──────────────────────────────────────────────────
+// This page lives in /student, but uploads/ sits at the project root and
+// the DB stores web-root-relative paths (e.g. "uploads/id_photos/x.png").
+// So: use $uploads_fs for filesystem calls, $uploads_web for anything
+// stored in the DB or rendered into an href/src.
+$uploads_fs  = dirname(__DIR__) . '/uploads';
+$uploads_web = 'uploads';
 
 // ── CSRF token (one per session) ───────────────────────────────────
 if (empty($_SESSION['csrf_token'])) {
@@ -33,19 +40,10 @@ function verifyCsrf(): bool
     return isset($_POST['csrf_token']) && hash_equals($_SESSION['csrf_token'], $_POST['csrf_token']);
 }
 
-// ── Shared list of requestable document types (keep in sync everywhere) ──
-// ── Documents requestable fully online ──
-$documentTypes = [
-    'Certificate of Registration',
-    'Certificate of Enrollment',
-    'Certificate of Grades',
-    'Certificate of Good Moral',
-    'Certificate of Transfer',
-    'Certificate of Completion/Graduation',
-     'SF10/Form 137',
-    'Diploma',
-    'YearBook',
-];
+// ── Shared list of requestable document types ────────────────────
+// Single source of truth (phpLogics/document_types.php) — the same list
+// validates edits in editReq.php, so the two sides can never drift.
+$documentTypes = require __DIR__ . '/../phpLogics/document_types.php';
 
 $inPersonOnlyTypes = [
     'SF10/Form 137',
@@ -104,13 +102,14 @@ if (isset($_FILES['profile_photo']) && $_FILES['profile_photo']['error'] === UPL
                 } elseif ($img_size > 3 * 1024 * 1024) {
                     $updateError = "Profile photo must be under 3 MB.";
                 } else {
-                    $photo_dir = 'uploads/profile_photos/';
-                    if (!is_dir($photo_dir)) mkdir($photo_dir, 0755, true);
+                    $photo_fs_dir = $uploads_fs . '/profile_photos/';
+                    if (!is_dir($photo_fs_dir)) mkdir($photo_fs_dir, 0755, true);
                     $photo_fn   = 'student_' . $student_id . '_' . time() . '_' . rand(100, 999) . '.' . $img_ext;
-                    $photo_dest = $photo_dir . $photo_fn;
-                    if (move_uploaded_file($_FILES['profile_photo']['tmp_name'], $photo_dest)) {
-                        if (!empty($student['profile_photo']) && file_exists($student['profile_photo'])) {
-                            unlink($student['profile_photo']);
+                    $photo_dest = $uploads_web . '/profile_photos/' . $photo_fn;
+                    if (move_uploaded_file($_FILES['profile_photo']['tmp_name'], $photo_fs_dir . $photo_fn)) {
+                        $old = $uploads_fs . '/' . ltrim($student['profile_photo'], '/');
+                        if (!empty($student['profile_photo']) && file_exists($old)) {
+                            unlink($old);
                         }
                         $new_photo = $photo_dest;
                     } else {
@@ -127,8 +126,8 @@ if (isset($_FILES['profile_photo']) && $_FILES['profile_photo']['error'] === UPL
 // ── NEW: ID photo front/back (optional replacement) ────────────────
 $allowed_img_types = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
 $allowed_img_ext   = ['jpg', 'jpeg', 'png', 'gif', 'webp'];
-$id_dir            = 'uploads/id_photos/';
-if (!is_dir($id_dir)) mkdir($id_dir, 0755, true);
+$id_fs_dir         = $uploads_fs . '/id_photos/';
+if (!is_dir($id_fs_dir)) mkdir($id_fs_dir, 0755, true);
 
 $new_id_front = $student['id_front'] ?? null;
 $new_id_back  = $student['id_back']  ?? null;
@@ -147,10 +146,12 @@ foreach (['id_front' => &$new_id_front, 'id_back' => &$new_id_back] as $field =>
             $updateError = ucfirst(str_replace('_', ' ', $field)) . ": file exceeds 3 MB limit.";
         } else {
             $filename = $field . '_' . $student_id . '_' . time() . '_' . rand(100, 999) . '.' . $ext;
-            $dest     = $id_dir . $filename;
-            if (move_uploaded_file($file['tmp_name'], $dest)) {
-                if (!empty($target) && file_exists($target)) unlink($target);
-                $target = $dest;
+            if (move_uploaded_file($file['tmp_name'], $id_fs_dir . $filename)) {
+                if (!empty($target)) {
+                    $old = $uploads_fs . '/' . ltrim($target, '/');
+                    if (file_exists($old)) unlink($old);
+                }
+                $target = $uploads_web . '/id_photos/' . $filename;
             } else {
                 $updateError = ucfirst(str_replace('_', ' ', $field)) . ": failed to save. Please try again.";
             }
@@ -236,7 +237,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_request'])) {
         $errorMsg = "Please select a valid document type.";
     } else {
 
-        // ── Limit: max 5 pending requests at once ──
+        // ── Limit: max 3 pending requests at once ──
         $countStmt = $conn->prepare(
             "SELECT COUNT(*) AS cnt FROM document_requests WHERE student_id = ? AND status = 'Pending'"
         );
@@ -255,8 +256,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_request'])) {
         $dupCount = $dupStmt->get_result()->fetch_assoc()['cnt'];
         $dupStmt->close();
 
-        if ($pendingCount >= 5) {
-            $errorMsg = "You already have 5 pending requests. Please wait for one to be processed before submitting a new one.";
+        if ($pendingCount >= 3) {
+            $errorMsg = "You already have 3 pending requests. Please wait for one to be processed before submitting a new one.";
         } elseif ($dupCount > 0) {
             $errorMsg = "You already have a pending request for \"$doc_type\". Please wait for it to be processed.";
         } elseif (!isset($_FILES['id_photo']) || $_FILES['id_photo']['error'] !== UPLOAD_ERR_OK) {
@@ -264,8 +265,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_request'])) {
         } else {
         $allowed_types = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'application/pdf'];
         $max_size      = 5 * 1024 * 1024;
-        $upload_dir    = 'uploads/request_requirements/';
-        if (!is_dir($upload_dir)) mkdir($upload_dir, 0755, true);
+        $req_fs_dir    = $uploads_fs . '/request_requirements/';   // filesystem
+        $req_web_dir   = $uploads_web . '/request_requirements/';  // stored in DB
+        if (!is_dir($req_fs_dir)) mkdir($req_fs_dir, 0755, true);
 
         $upload_errors = [];
         $saved_files   = ['id_photo' => null, 'auth_letter' => null];
@@ -284,8 +286,8 @@ if (!in_array($id_ext, $allowed_ext, true)) {
     $upload_errors[] = "Valid ID: file exceeds 5 MB limit.";
 } else {
     $filename = 'id_photo_' . $student_id . '_' . time() . '_' . rand(100, 999) . '.' . $id_ext;
-    if (move_uploaded_file($id_file['tmp_name'], $upload_dir . $filename)) {
-        $saved_files['id_photo'] = $upload_dir . $filename;
+    if (move_uploaded_file($id_file['tmp_name'], $req_fs_dir . $filename)) {
+        $saved_files['id_photo'] = $req_web_dir . $filename;
     } else {
         $upload_errors[] = "Valid ID: failed to save. Please try again.";
     }
@@ -304,71 +306,65 @@ if (!in_array($id_ext, $allowed_ext, true)) {
         $upload_errors[] = "Authorization Letter: file exceeds 5 MB limit.";
     } else {
         $filename = 'auth_letter_' . $student_id . '_' . time() . '_' . rand(100, 999) . '.' . $al_ext;
-        if (move_uploaded_file($al_file['tmp_name'], $upload_dir . $filename)) {
-            $saved_files['auth_letter'] = $upload_dir . $filename;
+        if (move_uploaded_file($al_file['tmp_name'], $req_fs_dir . $filename)) {
+            $saved_files['auth_letter'] = $req_web_dir . $filename;
         } else {
             $upload_errors[] = "Authorization Letter: failed to save. Please try again.";
         }
     }
 }
 
-        // ── Payment method ──
-        $payment_method = isset($_POST['payment']) && in_array($_POST['payment'], ['Cash', 'Cashless'], true)
-            ? $_POST['payment']
-            : null;
-
-        if (!$payment_method) {
-            $upload_errors[] = "Please select a payment method.";
-        }
-
-        // ── Receipt (optional) ──
+        // ── Payment removed from the student flow ──
+        // Payment is now settled in person at the Registrar's Office during
+        // pickup. The columns stay NULL/Unpaid; the registrar side can still
+        // see and manage payment status for records created before this change.
+        $payment_method = null;
         $saved_files['receipt'] = null;
-
-        if (isset($_FILES['receipt']) && $_FILES['receipt']['error'] === UPLOAD_ERR_OK) {
-            $rc_file = $_FILES['receipt'];
-            $rc_type = mime_content_type($rc_file['tmp_name']);
-            $rc_ext  = strtolower(pathinfo($rc_file['name'], PATHINFO_EXTENSION));
-
-            if (!in_array($rc_ext, $allowed_ext, true)) {
-                $upload_errors[] = "Receipt: file extension not allowed.";
-            } elseif (!in_array($rc_type, $allowed_types)) {
-                $upload_errors[] = "Receipt: invalid file type.";
-            } elseif ($rc_file['size'] > $max_size) {
-                $upload_errors[] = "Receipt: file exceeds 5 MB limit.";
-            } else {
-                $filename = 'receipt_' . $student_id . '_' . time() . '_' . rand(100, 999) . '.' . $rc_ext;
-                if (move_uploaded_file($rc_file['tmp_name'], $upload_dir . $filename)) {
-                    $saved_files['receipt'] = $upload_dir . $filename;
-                } else {
-                    $upload_errors[] = "Receipt: failed to save. Please try again.";
-                }
-            }
-        }
 
         if (!empty($upload_errors)) {
             $errorMsg = implode(' ', $upload_errors);
         } else {
-            $payment_status = ($payment_method === 'Cashless' && $saved_files['receipt'])
-                ? 'Pending Verification'
-                : 'Unpaid';
-
             $ins = $conn->prepare(
                 "INSERT INTO document_requests
                     (student_id, document_type, purpose, id_photo, auth_letter, payment_method, receipt, payment_status)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+                 VALUES (?, ?, ?, ?, ?, ?, ?, 'Unpaid')"
             );
             $ins->bind_param(
-                "isssssss",
+                "issssss",
                 $student_id,
                 $doc_type,
                 $purpose,
                 $saved_files['id_photo'],
                 $saved_files['auth_letter'],
                 $payment_method,
-                $saved_files['receipt'],
-                $payment_status
+                $saved_files['receipt']
             );
                if ($ins->execute()) {
+                // ── Tell the registrar accounts a new request is waiting ──
+                $newReqNo = 'REQ-' . str_pad((string) $conn->insert_id, 4, '0', STR_PAD_LEFT);
+                try {
+                    $regs = $conn->query(
+                        "SELECT email, first_name, last_name FROM students
+                         WHERE LOWER(role) = 'registrar' AND LOWER(status) != 'archived'
+                           AND email IS NOT NULL AND email <> ''"
+                    );
+                    while ($regs && ($rg = $regs->fetch_assoc())) {
+                        $res = send_registrar_request_email(
+                            $rg['email'],
+                            trim($rg['first_name'] . ' ' . $rg['last_name']),
+                            $newReqNo,
+                            $student['first_name'] . ' ' . $student['last_name'],
+                            $doc_type,
+                            $purpose
+                        );
+                        if (!$res['ok']) {
+                            error_log("Registrar new-request notice failed ({$newReqNo}): " . $res['error']);
+                        }
+                    }
+                } catch (Throwable $e) {
+                    error_log("Registrar new-request notice error ({$newReqNo}): " . $e->getMessage());
+                }
+
                 header("Location: dashboard.php?success=1&view=requests");
                 exit();
             } else {
@@ -378,6 +374,24 @@ if (!in_array($id_ext, $allowed_ext, true)) {
         }
         }
     }
+}
+
+// ── Announcements (admin-managed) ──────────────────────────────
+$annStmt = $conn->query(
+    "SELECT title, message, created_at FROM announcements WHERE is_active = 1 ORDER BY created_at DESC LIMIT 5"
+);
+$announcements = $annStmt ? $annStmt->fetch_all(MYSQLI_ASSOC) : [];
+
+// ── Surface endpoint error redirects (edit/restore failures) as alerts ──
+if (empty($errorMsg) && isset($_GET['error'])) {
+    $errorMsg = match ($_GET['error']) {
+        'csrf_fail'        => 'Your session expired. Please try again.',
+        'missing_fields'   => 'Please fill in all required fields.',
+        'invalid_doc_type' => 'Please select a valid document type.',
+        'not_found'        => 'That request can no longer be edited — it may have already been processed.',
+        'db_fail'          => 'Something went wrong. Please try again.',
+        default            => 'An error occurred. Please try again.',
+    };
 }
 
 // ── Fetch requests ─────────────────────────────────────────────────
@@ -399,12 +413,12 @@ foreach ($myRequests as $r) {
 
 $cntTotal   = count($myRequests);
 $cntPending = 0;
-$cntReady   = 0;
+$cntReleased = 0;
 $cntProcessing = 0;
 $cntCancelled = 0;
 foreach ($myRequests as $r) {
     if ($r['status'] === 'Pending')          $cntPending++;
-    if ($r['status'] === 'Ready for Pickup') $cntReady++;
+    if ($r['status'] === 'Released')         $cntReleased++;
     if ($r['status'] === 'Processing')       $cntProcessing++;
     if ($r['status'] === 'Cancelled')        $cntCancelled++;
 }
@@ -414,7 +428,7 @@ function badgeClass($status, $cancelledBy = '')
     if ($status === 'Cancelled') {
         if ($cancelledBy === 'registrar') return 'rejected';
         if ($cancelledBy === 'unclaimed') return 'unclaimed';
-        return 'unclaimed'; // student-cancelled also shows as unclaimed
+        return 'cancelled';   // cancelled by the student
     }
     return match ($status) {
         'Ready for Pickup' => 'ready',
@@ -428,6 +442,9 @@ function badgeClass($status, $cancelledBy = '')
 $activeView     = $_GET['view'] ?? 'dashboard';
 $activeTab      = $_GET['tab']  ?? 'main';
 $profilePhoto   = !empty($student['profile_photo']) ? $student['profile_photo'] : null;
+// DB paths are web-root-relative ("uploads/..."); this page sits one level
+// deeper, so rendered src attributes need the "../" prefix.
+$profilePhotoUrl = $profilePhoto ? '../' . $profilePhoto : null;
 $avatarInitials = strtoupper(substr($student['first_name'], 0, 1) . substr($student['last_name'], 0, 1));
 ?>
 <!DOCTYPE html>
@@ -444,7 +461,8 @@ $avatarInitials = strtoupper(substr($student['first_name'], 0, 1) . substr($stud
         localStorage.removeItem('hehms-theme');
         document.documentElement.removeAttribute('data-theme');
     </script>
-    <link rel="stylesheet" href="css/dashb.css">
+    <link rel="stylesheet" href="dashb.css">
+    <?php echo theme_head(); // admin-managed brand color ?>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
@@ -456,7 +474,7 @@ $avatarInitials = strtoupper(substr($student['first_name'], 0, 1) . substr($stud
     <!-- ══ HEADER ══ -->
     <div class="header">
         <a href="dashboard.php" class="header-left">
-    <img src="img/Logo.png" alt="School Logo" class="logo-img">
+    <img src="<?php echo site_logo_url(); ?>" alt="School Logo" class="logo-img">
 
     <div class="school-info">
         <h2>Hilario E. Hermosa Memorial High School</h2>
@@ -479,7 +497,7 @@ $avatarInitials = strtoupper(substr($student['first_name'], 0, 1) . substr($stud
      onclick="toggleProfileMenu(event)"
      style="cursor:pointer;">
     <?php if ($profilePhoto): ?>
-        <img src="<?php echo htmlspecialchars($profilePhoto); ?>" alt="avatar">
+        <img src="<?php echo htmlspecialchars($profilePhotoUrl); ?>" alt="avatar">
     <?php else: ?>
         <?php echo $avatarInitials; ?>
     <?php endif; ?>
@@ -490,7 +508,7 @@ $avatarInitials = strtoupper(substr($student['first_name'], 0, 1) . substr($stud
                 👤 Account Information
             </a>
 
-            <a href="phpLogics/Logout.php">
+            <a href="../phpLogics/Logout.php">
                 🚪 Logout
             </a>
         </div>
@@ -509,7 +527,7 @@ $avatarInitials = strtoupper(substr($student['first_name'], 0, 1) . substr($stud
 
         <div class="welcome-avatar">
             <?php if ($profilePhoto): ?>
-                <img src="<?php echo htmlspecialchars($profilePhoto); ?>" alt="Profile Avatar">
+                <img src="<?php echo htmlspecialchars($profilePhotoUrl); ?>" alt="Profile Avatar">
             <?php else: ?>
                 <?php echo htmlspecialchars($avatarInitials); ?>
             <?php endif; ?>
@@ -567,7 +585,7 @@ $avatarInitials = strtoupper(substr($student['first_name'], 0, 1) . substr($stud
       
                 <div class="nav-divider"></div>
                 <div class="nav-group-label">Others</div>
-            <a href="phpLogics/Logout.php" class="nav-main-item logout">
+            <a href="../phpLogics/Logout.php" class="nav-main-item logout">
     <div class="nmi-icon">↩️</div>
     <div class="nmi-text">
         <div class="nmi-title">LOGOUT</div>
@@ -610,7 +628,7 @@ $avatarInitials = strtoupper(substr($student['first_name'], 0, 1) . substr($stud
         <div class="card"><span class="card-icon">📋</span><h4>Total Requests</h4><h2><?php echo $cntTotal; ?></h2></div>
         <div class="card"><span class="card-icon">⏳</span><h4>Pending</h4><h2><?php echo $cntPending; ?></h2></div>
         <div class="card"><span class="card-icon">⚙️</span><h4>Processing</h4><h2><?php echo $cntProcessing; ?></h2></div>
-        <div class="card"><span class="card-icon">📦</span><h4>Ready to Pickup</h4><h2><?php echo $cntReady; ?></h2></div>
+        <div class="card"><span class="card-icon">✅</span><h4>Released</h4><h2><?php echo $cntReleased; ?></h2></div>
         <div class="card"><span class="card-icon">❌</span><h4>Cancelled</h4><h2><?php echo $cntCancelled; ?></h2></div>
     </div>
 
@@ -618,8 +636,16 @@ $avatarInitials = strtoupper(substr($student['first_name'], 0, 1) . substr($stud
         <div class="dashboard-card">
             <h3>📢 Announcements</h3>
             <ul class="dashboard-list">
-                <li>No new announcements.</li>
-                <li>Check back regularly for updates.</li>
+                <?php if (empty($announcements)): ?>
+                    <li>No new announcements.</li>
+                    <li>Check back regularly for updates.</li>
+                <?php else: foreach ($announcements as $a): ?>
+                    <li>
+                        <strong><?php echo htmlspecialchars($a['title']); ?></strong>
+                        <small> — <?php echo date('M d, Y', strtotime($a['created_at'])); ?></small><br>
+                        <?php echo nl2br(htmlspecialchars($a['message'])); ?>
+                    </li>
+                <?php endforeach; endif; ?>
             </ul>
         </div>
 
@@ -668,6 +694,10 @@ $avatarInitials = strtoupper(substr($student['first_name'], 0, 1) . substr($stud
 </div>
                 <?php if ($successMsg): ?>
                     <div class="alert alert-success">✔ <?php echo htmlspecialchars($successMsg); ?></div>
+                <?php endif; ?>
+
+                <?php if ($errorMsg): ?>
+                    <div class="alert alert-danger">⚠️ <?php echo htmlspecialchars($errorMsg); ?></div>
                 <?php endif; ?>
 
               
@@ -829,8 +859,11 @@ $avatarInitials = strtoupper(substr($student['first_name'], 0, 1) . substr($stud
                                                 <?php endif; ?>
                                             </td>
                                             <td>
+                                                <?php if (!empty($r['e_certificate'])): ?>
+                                                    <a class="btn-dl-cert" href="../phpLogics/downloadCert.php?req_id=<?php echo (int)$r['id']; ?>">🎓 e-Certificate</a>
+                                                <?php endif; ?>
                                                 <?php if ($canRestore): ?>
-                                                    <form method="POST" action="phpLogics/restoreReq.php" style="display:inline;"
+                                                    <form method="POST" action="../phpLogics/restoreReq.php" style="display:inline;"
                                                         onsubmit="return confirm('Restore this request to active?');">
                                                         <input type="hidden" name="restore_request" value="1">
                                                         <input type="hidden" name="req_id" value="<?php echo $r['id']; ?>">
@@ -891,7 +924,7 @@ $avatarInitials = strtoupper(substr($student['first_name'], 0, 1) . substr($stud
         <strong>📌 Note:</strong><br>
         <ul class="note-list">
             <li>Only the documents listed below can be requested online.</li>
-            <li>You may have a maximum of 5 pending requests at a time.</li>
+            <li>You may have a maximum of 3 pending requests at a time.</li>
             <li>You cannot submit a new request for a document type while a previous request for it is still pending.</li>
         </ul>
     </p>
@@ -1001,114 +1034,10 @@ $avatarInitials = strtoupper(substr($student['first_name'], 0, 1) . substr($stud
                     </div>
                 </div>
 
-                <button type="button" class="save-btn" onclick="proceedToPayment()">Continue to payment →</button>
+                <button type="button" class="save-btn" onclick="submitRequest()">✅ Submit Request</button>
             </div>
         </div>
 
-        <!-- ===== STEP 3: PAYMENT ===== -->
-        <div id="step-payment" style="display:none;">
-            <div class="payment-card">
-                <h2>💳 Choose Payment Method</h2>
-
-                <label class="payment-option">
-                    <input type="radio" name="payment" value="Cash" required>
-                    <div><strong>Cash</strong><p>Pay at the Registrar's Office during pickup.</p></div>
-                </label>
-
-                <label class="payment-option">
-                    <input type="radio" name="payment" value="Cashless">
-                    <div><strong>Cashless</strong><p>Pay Online through GCash/Maya Wallet.</p></div>
-                </label>
-
-                <div style="display:flex; gap:10px; margin-top:18px;">
-                    <button type="button" class="btn-edit" onclick="backToStep2()">← Back</button>
-                    <button type="button" class="save-btn" style="flex:1;" onclick="proceedPayment()">
-    ✅ Proceed
-</button>
-                </div>
-            </div>
-        </div>
-
-
-<!-- ===== STEP 4: CASHLESS PAYMENT ===== -->
-<div id="step-cashless" style="display:none;">
-    <div class="payment-card">
-        <h2>📲 Cashless Payment</h2>
-        <p>Please scan one of the QR codes below to complete your payment.</p>
-<br>
-        <div class="price-list">
-            <p class="price-list-title">Prices of requested documents</p>
-            <ul>
-                <li><span>COE, COG, COR</span><span>₱20.00</span></li>
-                <li><span>Completion / Graduation</span><span>₱100.00</span></li>
-                <li><span>Transfer, Good Moral</span><span>₱30.00</span></li>
-            </ul>
-        </div>
-
-        <div class="qr-payment-grid">
-
-            <div class="qr-payment-card">
-                <div class="qr-img-wrap">
-                    <img src="img/gc.jpg" alt="GCash QR">
-                </div>
-                <p class="qr-label">GCash</p>
-            </div>
-
-            <div class="qr-payment-card">
-                <div class="qr-img-wrap">
-                    <img src="img/maya.jfif" alt="Maya QR">
-                </div>
-                <p class="qr-label">Maya</p>
-            </div>
-
-        </div>
-<br>
-        <p class="qr-alt-number">
-            Alternative number for GCash/Maya: <strong>09123456789</strong>
-        </p>
-        <p class="qr-alt-number">
-            Alternative number for GCash/Maya: <strong>09123456789</strong>
-        </p>
-        <p class="qr-alt-number">
-            Alternative number for GCash/Maya: <strong>09123456789</strong>
-        </p>
-
-
-
-
-        <div class="qr-notes">
-            <p class="qr-note">After payment, click <strong>"Attach Receipt"</strong> below and upload your receipt to confirm your transaction.</p>
-            <p class="qr-note">The receipt will be verified by the registrar.</p>
-        </div>
-
-      <!-- ===== RECEIPT UPLOAD ===== -->
-        <div class="acct-form-group full" style="margin-top:20px;">
-            <label>Payment Receipt </label>
-            <div class="req-upload-card" id="receipt-card"
-                ondragover="cardDragOver(event,'receipt-card')"
-                ondragleave="cardDragLeave('receipt-card')"
-                ondrop="cardDrop(event,'receipt-card','receipt-input','receipt-name','receipt-preview')">
-                <input type="file" name="receipt" id="receipt-input"
-                    accept="image/jpeg,image/png,image/gif,image/webp,application/pdf"
-                    onchange="cardFileSelected(this,'receipt-card','receipt-name','receipt-preview')">
-                <button type="button" class="ruc-remove-btn"
-                    onclick="cardRemoveFile(event,'receipt-card','receipt-input','receipt-name','receipt-preview')">✕</button>
-                <span class="ruc-check">✅</span>
-                <span class="ruc-icon">🧾</span>
-                <span class="ruc-title">Attach Receipt</span>
-                <p class="ruc-hint">Screenshot or photo of your payment confirmation</p>
-                <div class="ruc-preview" id="receipt-preview"></div>
-                <div class="ruc-filename" id="receipt-name"></div>
-            </div>
-        </div>
-
-        <div style="display:flex; gap:10px; margin-top:22px;">
-            <button type="button" class="btn-edit" onclick="backToPayment()">← Back</button>
-            <button type="button" class="save-btn" style="flex:1;" onclick="submitCashlessPayment()">✅ I Have Paid</button>
-        </div>
-    </div>
-</div>  
-      
     </form>
 </div>
 
@@ -1148,7 +1077,7 @@ $avatarInitials = strtoupper(substr($student['first_name'], 0, 1) . substr($stud
                 <div class="avatar-ring">
                     <div class="account-avatar" id="avatar-display">
                         <?php if ($profilePhoto): ?>
-                            <img src="<?php echo htmlspecialchars($profilePhoto); ?>" alt="Profile photo"
+                            <img src="<?php echo htmlspecialchars($profilePhotoUrl); ?>" alt="Profile photo"
                                 onerror="this.remove(); document.getElementById('avatar-fallback-initials').style.display='flex';">
                             <span id="avatar-fallback-initials" style="display:none;"><?php echo $avatarInitials; ?></span>
                         <?php else: ?>
@@ -1438,7 +1367,7 @@ function clearAvatar() {
                 <button class="modal-close" onclick="closeEditModal()">✕</button>
             </div>
             <div class="modal-body">
-                <form method="POST" action="phpLogics/editReq.php" enctype="multipart/form-data">
+                <form method="POST" action="../phpLogics/editReq.php" enctype="multipart/form-data">
                     <input type="hidden" name="req_id" id="edit-req-id">
                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrfToken); ?>">
                     <div class="form-grid">
@@ -1517,7 +1446,7 @@ function clearAvatar() {
 
     
 
-    <script src="javascripts/dashb.js"></script>
+    <script src="dashb.js"></script>
     <script>
         <?php if ($errorMsg): ?>showView('request');
         <?php endif; ?>
@@ -1529,7 +1458,7 @@ function clearAvatar() {
                 document.getElementById('profile-photo-input').value = '';
                 document.getElementById('avatar-new-preview').classList.remove('visible');
                 document.getElementById('avatar-display').innerHTML =
-                    '<img src="<?php echo htmlspecialchars($profilePhoto); ?>" style="width:100%;height:100%;object-fit:cover;">';
+                    '<img src="<?php echo htmlspecialchars($profilePhotoUrl); ?>" style="width:100%;height:100%;object-fit:cover;">';
             }
         <?php else: ?>
 

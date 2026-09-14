@@ -12,5 +12,5 @@ if (ini_get("session.use_cookies")) {
 session_start();
 $_SESSION['flash'] = "You have been logged out.";
 
-header("Location: " . base_url('mainPage.php') . "?loggedout=1");
+header("Location: " . base_url('auth/mainPage.php') . "?loggedout=1");
 exit();

@@ -41,7 +41,6 @@ function selectDocument(docName) {
 
     document.getElementById('step-document').style.display = 'none';
     document.getElementById('step-form').style.display = 'block';
-    document.getElementById('step-payment').style.display = 'none';
 
     sessionStorage.setItem('hehms_selected_doc', docName);
 
@@ -51,7 +50,6 @@ function selectDocument(docName) {
 function backToStep1() {
     document.getElementById('step-document').style.display = 'block';
     document.getElementById('step-form').style.display = 'none';
-    document.getElementById('step-payment').style.display = 'none';
 
     sessionStorage.removeItem('hehms_selected_doc');
 
@@ -59,6 +57,12 @@ function backToStep1() {
 }
 
 function proceedToPayment() {
+    /* Payment step removed — students settle payment in person at the
+       Registrar's Office. Kept as an alias in case of cached pages. */
+    submitRequest();
+}
+
+function submitRequest() {
     var purpose = document.getElementById('purpose-input');
     var idPhoto = document.getElementById('new-id-input');
 
@@ -72,45 +76,6 @@ function proceedToPayment() {
         return;
     }
 
-    document.getElementById('step-form').style.display = 'none';
-    document.getElementById('step-payment').style.display = 'block';
-    history.replaceState({}, '', '?view=request&step=payment');
-}
-
-function backToStep2() {
-    document.getElementById('step-document').style.display = 'none';
-    document.getElementById('step-form').style.display = 'block';
-    document.getElementById('step-payment').style.display = 'none';
-
-    history.replaceState({}, "", "?view=request&step=form");
-}
-
-function proceedPayment() {
-    let payment = document.querySelector('input[name="payment"]:checked');
-
-    if (!payment) {
-        alert("Please select a payment method.");
-        return;
-    }
-
-    if (payment.value === "Cash") {
-        document.getElementById('request-form').requestSubmit();
-
-    } else if (payment.value === "Cashless") {
-        document.getElementById("step-payment").style.display = "none";
-        document.getElementById("step-cashless").style.display = "block";
-        history.replaceState({}, '', '?view=request&step=cashless');
-    }
-}
-
-function backToPayment() {
-    document.getElementById("step-cashless").style.display = "none";
-    document.getElementById("step-payment").style.display = "block";
-    history.replaceState({}, '', '?view=request&step=payment');
-}
-
-/* ── Cashless payment submit (receipt optional) ── */
-function submitCashlessPayment() {
     document.getElementById('request-form').requestSubmit();
 }
 
@@ -199,7 +164,8 @@ function applyExisting(existingPath, cardId, badgeId, linkId, reqId, field) {
     if (existingPath) {
         var fname = existingPath.split('/').pop();
         var ext   = fname.split('.').pop().toLowerCase();
-        var downloadUrl = 'download.php?field=' + field + '&req_id=' + reqId;
+        // download.php lives in phpLogics/ (page-relative from /student/)
+        var downloadUrl = '../phpLogics/download.php?field=' + field + '&req_id=' + reqId;
 
         badge.classList.add('visible');
         link.href      = downloadUrl;
@@ -363,22 +329,11 @@ window.addEventListener('DOMContentLoaded', function () {
             }
         }
 
-        if (step === 'payment') {
+        // Legacy payment/cashless steps removed — send old bookmarks
+        // (step=payment / step=cashless) back to the form step.
+        if (step === 'payment' || step === 'cashless') {
             document.getElementById('step-document').style.display = 'none';
-            document.getElementById('step-form').style.display = 'none';
-            document.getElementById('step-payment').style.display = 'block';
-
-            if (savedDoc) {
-                document.getElementById('selected-document-input').value = savedDoc;
-                document.getElementById('selected-doc-label').textContent = savedDoc;
-            }
-        }
-
-        if (step === 'cashless') {
-            document.getElementById('step-document').style.display = 'none';
-            document.getElementById('step-form').style.display = 'none';
-            document.getElementById('step-payment').style.display = 'none';
-            document.getElementById('step-cashless').style.display = 'block';
+            document.getElementById('step-form').style.display = 'block';
 
             if (savedDoc) {
                 document.getElementById('selected-document-input').value = savedDoc;

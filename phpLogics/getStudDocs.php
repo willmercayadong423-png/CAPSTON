@@ -2,7 +2,7 @@
 require("auth.php");
 include("../database/db.php");
 
-if (strtolower($_SESSION['role']) !== 'registrar') {
+if (strtolower($_SESSION['role']) !== 'admin') {
     echo json_encode(['error' => 'Unauthorized']); exit();
 }
 

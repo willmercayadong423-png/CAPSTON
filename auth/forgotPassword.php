@@ -1,7 +1,8 @@
 <?php
-require './database/db.php';
-require './database/config.php';
-require './vendor/autoload.php';
+require __DIR__ . '/../database/db.php';
+require __DIR__ . '/../database/config.php';
+require __DIR__ . '/../vendor/autoload.php';
+require __DIR__ . '/../phpLogics/site_config.php';
 
 use PHPMailer\PHPMailer\PHPMailer;
 use PHPMailer\PHPMailer\Exception;
@@ -166,13 +167,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
 
-    <link rel="stylesheet" href="css/mainPageCSS.css">
-    <link rel="stylesheet" href="css/dark.css">
-    <link rel="stylesheet" href="css/forgotPass.css">
+    <link rel="stylesheet" href="mainPageCSS.css">
+    <link rel="stylesheet" href="../assets/css/dark.css">
+    <link rel="stylesheet" href="forgotPass.css">
+    <?php echo theme_head(); // admin-managed brand color ?>
 
     <!-- Apply dark mode before paint to avoid flash -->
-    <script src="javascripts/forgotPass.js"></script>
-    <script src="javascripts/dark.js" defer></script>
+    <script src="forgotPass.js"></script>
+    <script src="../assets/js/dark.js" defer></script>
 </head>
 <body>
 

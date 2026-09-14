@@ -1888,3 +1888,21 @@ box-shadow:0 6px 18px rgba(0,0,0,.06);
     .nav-main-item { min-width: 64px; padding: 6px 8px; }
     .nav-main-item .nmi-icon { width: 30px; height: 30px; font-size: 14px; }
 }
+/* ── e-Certificate download (My Requests → History) ── */
+.btn-dl-cert {
+    display: inline-block;
+    margin-bottom: 6px;
+    padding: 6px 13px;
+    background: #f0fdf4;
+    color: #166534;
+    border: 1px solid #bbf7d0;
+    border-radius: 7px;
+    font-size: 12px;
+    font-weight: 600;
+    text-decoration: none;
+    transition: background .15s;
+}
+.btn-dl-cert:hover { background: #dcfce7; }
+
+/* Student-cancelled badge (its own look, no longer shares "unclaimed") */
+.badge.cancelled { background: #f3f4f6; color: #4b5563; border: 1px solid #e5e7eb; }

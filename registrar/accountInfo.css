@@ -1,0 +1,162 @@
+/* ═══════════════════════════════════════════════════
+   HEHMS — Registrar Account Info CSS  (accountInfo.css)
+   Loaded after registrarCSS.css; uses its brand vars.
+   ═══════════════════════════════════════════════════ */
+
+.account-card {
+    background: var(--white, #fff);
+    border-radius: 16px;
+    padding: 28px;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, .05);
+    max-width: 720px;
+}
+
+.avatar-section {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    margin-bottom: 24px;
+}
+
+.account-avatar {
+    width: 84px;
+    height: 84px;
+    border-radius: 50%;
+    overflow: hidden;
+    background: linear-gradient(135deg, var(--green-dark, #3d5a1e), var(--green-mid, #6b8f3a));
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.4rem;
+    font-weight: 700;
+    flex-shrink: 0;
+}
+
+.account-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.btn-upload {
+    display: inline-block;
+    background: var(--green-pale, #d6e4b8);
+    color: var(--green-dark, #3d5a1e);
+    padding: 8px 16px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: .85rem;
+    font-weight: 600;
+}
+
+.btn-upload:hover {
+    filter: brightness(.96);
+}
+
+.file-name {
+    font-size: .8rem;
+    color: var(--text-muted, #7a8a65);
+    margin-top: 6px;
+}
+
+.form-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px 18px;
+    margin-bottom: 20px;
+}
+
+.form-group.full {
+    grid-column: 1 / -1;
+}
+
+.form-group label {
+    display: block;
+    font-size: .82rem;
+    font-weight: 600;
+    margin-bottom: 6px;
+    color: var(--text-dark, #1a2409);
+}
+
+.form-group input {
+    width: 100%;
+    padding: 10px 14px;
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+    font: inherit;
+    color: var(--text-mid, #3d4a2a);
+    background: var(--white, #fff);
+    transition: border-color .15s;
+}
+
+.form-group input:focus {
+    outline: none;
+    border-color: var(--green-mid, #6b8f3a);
+    box-shadow: 0 0 0 3px rgba(107, 143, 58, .15);
+}
+
+.req-star {
+    color: #b91c1c;
+}
+
+.hint-inline {
+    color: var(--text-muted, #7a8a65);
+    font-weight: 400;
+}
+
+.save-btn {
+    background: linear-gradient(135deg, var(--green-dark, #3d5a1e), var(--green-mid, #6b8f3a));
+    color: #fff;
+    border: none;
+    padding: 12px 26px;
+    border-radius: 10px;
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+    transition: .15s;
+}
+
+.save-btn:hover {
+    filter: brightness(1.08);
+}
+
+.save-btn:disabled {
+    opacity: .6;
+    cursor: wait;
+}
+
+.toast {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    z-index: 999;
+    padding: 12px 22px;
+    border-radius: 10px;
+    color: #fff;
+    font-weight: 600;
+    opacity: 0;
+    transform: translateY(12px);
+    transition: .25s;
+    pointer-events: none;
+    max-width: 380px;
+}
+
+.toast.show {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+.toast.success {
+    background: var(--green-mid, #6b8f3a);
+}
+
+.toast.error {
+    background: #b91c1c;
+}
+
+@media (max-width: 700px) {
+    .form-grid {
+        grid-template-columns: 1fr;
+    }
+}

@@ -45,7 +45,7 @@ function verifyCsrfToken(?string $token = null): bool
 
 // Not logged in
 if (!isset($_SESSION["email"])) {
-    header("Location: " . base_url('mainPage.php'));
+    header("Location: " . base_url('auth/mainPage.php'));
     exit();
 }
 
@@ -62,3 +62,21 @@ if (isset($_SESSION["last_activity"]) &&
 
 // Refresh timer
 $_SESSION["last_activity"] = time();
+
+// ── Role helpers ──────────────────────────────────────────────
+function home_for_role(string $role): string
+{
+    return match (strtolower($role)) {
+        'student'   => base_url('student/dashboard.php'),
+        'admin'     => base_url('admin/adminDashboard.php'),
+        default     => base_url('registrar/registrarMainPage.php'),
+    };
+}
+
+function require_role(string $role): void
+{
+    if (strtolower($_SESSION['role'] ?? '') !== $role) {
+        header('Location: ' . home_for_role($_SESSION['role'] ?? ''));
+        exit;
+    }
+}

@@ -3,7 +3,7 @@ require("auth.php");
 header('Content-Type: application/json');
 
 // ── Registrar only ────────────────────────────────────────────────
-if (strtolower($_SESSION['role'] ?? '') !== 'registrar') {
+if (strtolower($_SESSION['role'] ?? '') !== 'admin') {
     http_response_code(403);
     echo json_encode(['success' => false, 'message' => 'Forbidden']);
     exit;
@@ -43,7 +43,7 @@ if ($password === '' && strlen($lrn) >= 5) {
     $password = $year . '-' . substr($lrn, -5);
 }
 
-$allowedRoles = ['Student', 'Registrar'];
+$allowedRoles = ['Student', 'Registrar', 'Admin'];
 
 if (!$first || !$last || !$email || !$contact || !$password) {
     echo json_encode(['success' => false, 'message' => 'All fields are required']);

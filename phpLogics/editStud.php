@@ -3,7 +3,7 @@ require("auth.php");
 header('Content-Type: application/json');
 
 // ── Registrar only ────────────────────────────────────────────────
-if (strtolower($_SESSION['role'] ?? '') !== 'registrar') {
+if (strtolower($_SESSION['role'] ?? '') !== 'admin') {
     http_response_code(403);
     echo json_encode(['success' => false, 'message' => 'Forbidden']);
     exit;
@@ -32,7 +32,7 @@ $grade  = trim($_POST['grade_level']               ?? '');
 $strand = trim($_POST['strand']                    ?? '');
 $syear  = trim($_POST['school_year_last_attended'] ?? '');
 
-$allowedRoles = ['Student', 'Registrar'];
+$allowedRoles = ['Student', 'Registrar', 'Admin'];
 
 if (!$student_id) {
     echo json_encode(['success' => false, 'message' => 'Missing ID']);

@@ -4,18 +4,18 @@ require("auth.php");
 include("../database/db.php");
 
 if (strtolower($_SESSION['role']) !== 'student') {
-    header("Location: ../registrarMainPage.php");
+    header("Location: ../registrar/registrarMainPage.php");
     exit();
 }
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !isset($_POST['edit_request'])) {
-    header("Location: ../dashboard.php");
+    header("Location: ../student/dashboard.php");
     exit();
 }
 
 // ── CSRF check ──────────────────────────────────────────────────────
 if (!isset($_POST['csrf_token']) || !hash_equals($_SESSION['csrf_token'] ?? '', $_POST['csrf_token'])) {
-    header("Location: ../dashboard.php?error=csrf_fail");
+    header("Location: ../student/dashboard.php?error=csrf_fail");
     exit();
 }
 
@@ -28,22 +28,16 @@ $purpose    = trim($_POST['purpose'] ?? '');
 
 // ── Validate basic fields ──────────────────────────────────────────
 if (!$req_id || empty($doc_type) || empty($purpose)) {
-    header("Location: ../dashboard.php?error=missing_fields");
+    header("Location: ../student/dashboard.php?error=missing_fields");
     exit();
 }
 
-$documentTypes = [
-    'Certificate of Registration',
-    'Certificate of Enrollment',
-    'Certificate of Good Moral',
-    'Certificate of Completion/Graduation',
-    'Certificate of Grades',
-    'Diploma',
-    'YearBook',
-];
+// ── Validate against the SHARED document list (phpLogics/document_types.php)
+// — same list the request form uses, so edits can never fail on a stale copy.
+$documentTypes = require __DIR__ . '/document_types.php';
 
 if (!in_array($doc_type, $documentTypes, true)) {
-    header("Location: ../dashboard.php?error=invalid_doc_type");
+    header("Location: ../student/dashboard.php?error=invalid_doc_type");
     exit();
 }
 
@@ -62,7 +56,7 @@ $existing = $chk->get_result()->fetch_assoc();
 $chk->close();
 
 if (!$existing) {
-    header("Location: ../dashboard.php?error=not_found");
+    header("Location: ../student/dashboard.php?error=not_found");
     exit();
 }
 
@@ -148,7 +142,7 @@ if (isset($_FILES['auth_letter']) && $_FILES['auth_letter']['error'] === UPLOAD_
 // ── If upload errors, redirect back with error ─────────────────────
 if (!empty($upload_errors)) {
     $msg = urlencode(implode(' ', $upload_errors));
-    header("Location: ../dashboard.php?upload_error=" . $msg);
+    header("Location: ../student/dashboard.php?upload_error=" . $msg);
     exit();
 }
 
@@ -169,9 +163,9 @@ $upd->bind_param(
 );
 
 if ($upd->execute()) {
-    header("Location: ../dashboard.php?edit_success=1&view=requests");
+    header("Location: ../student/dashboard.php?edit_success=1&view=requests");
 } else {
-    header("Location: ../dashboard.php?error=db_fail");
+    header("Location: ../student/dashboard.php?error=db_fail");
 }
 
 $upd->close();

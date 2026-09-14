@@ -11,7 +11,7 @@ if ($student_id === '') { echo json_encode([]); exit(); }
 
 $sql = "SELECT document_type, COUNT(*) as cnt
         FROM document_requests
-        WHERE student_id IN (SELECT id FROM students WHERE student_id = ?)
+        WHERE user_id IN (SELECT id FROM users WHERE student_id = ?)
         GROUP BY document_type";
 
 $stmt = $conn->prepare($sql);
@@ -20,21 +20,22 @@ $stmt->execute();
 $result = $stmt->get_result();
 
 $counts = [
-    'good_moral'    => 0,
-    'diploma'       => 0,
-    'form_137'      => 0,
-    'form_138'      => 0,
-    'transcript'    => 0,
-    'certification' => 0,
-    'yearbook'      => 0,
-    'tor'           => 0,
-    'other'         => 0,
+    'certificate_of_registration'          => 0,
+    'certificate_of_enrollment'            => 0,
+    'certificate_of_grades'                => 0,
+    'certificate_of_good_moral'            => 0,
+    'certificate_of_transfer'             => 0,
+    'certificate_of_completion_graduation' => 0,
+    'sf10_form_137'                        => 0,
+    'diploma'                              => 0,
+    'yearbook'                             => 0,
+    'other'                                => 0,
 ];
 
 while ($row = $result->fetch_assoc()) {
-    // Normalize: lowercase, spaces/dashes → underscore
+    // Normalize: lowercase, spaces/dashes/slashes → underscore
     $type = strtolower(trim($row['document_type']));
-    $type = str_replace([' ', '-'], '_', $type);
+    $type = str_replace([' ', '-', '/'], '_', $type);
 
     if (array_key_exists($type, $counts)) {
         $counts[$type] += (int)$row['cnt'];

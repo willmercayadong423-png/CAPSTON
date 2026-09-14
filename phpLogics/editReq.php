@@ -48,7 +48,7 @@ if (!in_array($doc_type, $documentTypes, true)) {
 $chk = $conn->prepare(
     "SELECT id, id_photo, auth_letter
      FROM document_requests
-     WHERE id = ? AND student_id = ? AND status = 'Pending'"
+     WHERE id = ? AND user_id = ? AND status = 'Pending'"
 );
 $chk->bind_param("ii", $req_id, $student_id);
 $chk->execute();
@@ -150,7 +150,7 @@ if (!empty($upload_errors)) {
 $upd = $conn->prepare(
     "UPDATE document_requests
      SET document_type = ?, purpose = ?, id_photo = ?, auth_letter = ?
-     WHERE id = ? AND student_id = ? AND status = 'Pending'"
+     WHERE id = ? AND user_id = ? AND status = 'Pending'"
 );
 $upd->bind_param(
     "ssssii",

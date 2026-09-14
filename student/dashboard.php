@@ -53,7 +53,7 @@ $inPersonOnlyTypes = [
 
 
 // ── Fetch student info ─────────────────────────────────────────────
-$s = $conn->prepare("SELECT * FROM students WHERE id = ?");
+$s = $conn->prepare("SELECT * FROM users WHERE id = ?");
 $s->bind_param("i", $student_id);
 $s->execute();
 $student = $s->get_result()->fetch_assoc();
@@ -78,7 +78,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_account'])) {
     } elseif ($new_contact !== '' && !preg_match('/^[0-9]{7,11}$/', $new_contact)) {
         $updateError = "Contact number must be 7–11 digits, numbers only.";
     } else {
-        $chk = $conn->prepare("SELECT id FROM students WHERE email = ? AND id != ?");
+        $chk = $conn->prepare("SELECT id FROM users WHERE email = ? AND id != ?");
         $chk->bind_param("si", $new_email, $student_id);
         $chk->execute();
         $chk->store_result();
@@ -174,7 +174,7 @@ unset($target);
     $new_sy         = trim($_POST['school_year_last_attended'] ?? '');
     $new_dob        = trim($_POST['date_of_birth'] ?? '');
 
-    $upd = $conn->prepare("UPDATE students
+    $upd = $conn->prepare("UPDATE users
         SET email=?, contact=?, profile_photo=?, id_front=?, id_back=?,
             lrn=?, first_name=?, last_name=?, grade_level=?, strand=?,
             school_year_last_attended=?, date_of_birth=?
@@ -187,7 +187,7 @@ unset($target);
 );
                 if ($upd->execute()) {
                     $updateSuccess = "Account information updated successfully.";
-                    $s2 = $conn->prepare("SELECT * FROM students WHERE id = ?");
+                    $s2 = $conn->prepare("SELECT * FROM users WHERE id = ?");
                     $s2->bind_param("i", $student_id);
                     $s2->execute();
                     $student     = $s2->get_result()->fetch_assoc();
@@ -210,7 +210,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['cancel_request']) && 
     $cancel = $conn->prepare(
         "UPDATE document_requests
          SET status = 'Cancelled', cancelled_by = 'student'
-         WHERE id = ? AND student_id = ? AND status = 'Pending'"
+         WHERE id = ? AND user_id = ? AND status = 'Pending'"
     );
     $cancel->bind_param("ii", $req_id, $student_id);
     $cancel->execute();
@@ -239,7 +239,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_request'])) {
 
         // ── Limit: max 3 pending requests at once ──
         $countStmt = $conn->prepare(
-            "SELECT COUNT(*) AS cnt FROM document_requests WHERE student_id = ? AND status = 'Pending'"
+            "SELECT COUNT(*) AS cnt FROM document_requests WHERE user_id = ? AND status = 'Pending'"
         );
         $countStmt->bind_param("i", $student_id);
         $countStmt->execute();
@@ -249,7 +249,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_request'])) {
         // ── Duplicate check: same document type already pending ──
         $dupStmt = $conn->prepare(
             "SELECT COUNT(*) AS cnt FROM document_requests
-             WHERE student_id = ? AND document_type = ? AND status = 'Pending'"
+             WHERE user_id = ? AND document_type = ? AND status = 'Pending'"
         );
         $dupStmt->bind_param("is", $student_id, $doc_type);
         $dupStmt->execute();
@@ -326,7 +326,7 @@ if (!in_array($id_ext, $allowed_ext, true)) {
         } else {
             $ins = $conn->prepare(
                 "INSERT INTO document_requests
-                    (student_id, document_type, purpose, id_photo, auth_letter, payment_method, receipt, payment_status)
+                    (user_id, document_type, purpose, id_photo, auth_letter, payment_method, receipt, payment_status)
                  VALUES (?, ?, ?, ?, ?, ?, ?, 'Unpaid')"
             );
             $ins->bind_param(
@@ -344,7 +344,7 @@ if (!in_array($id_ext, $allowed_ext, true)) {
                 $newReqNo = 'REQ-' . str_pad((string) $conn->insert_id, 4, '0', STR_PAD_LEFT);
                 try {
                     $regs = $conn->query(
-                        "SELECT email, first_name, last_name FROM students
+                        "SELECT email, first_name, last_name FROM users
                          WHERE LOWER(role) = 'registrar' AND LOWER(status) != 'archived'
                            AND email IS NOT NULL AND email <> ''"
                     );
@@ -395,7 +395,7 @@ if (empty($errorMsg) && isset($_GET['error'])) {
 }
 
 // ── Fetch requests ─────────────────────────────────────────────────
-$req = $conn->prepare("SELECT * FROM document_requests WHERE student_id = ? ORDER BY date_requested DESC");
+$req = $conn->prepare("SELECT * FROM document_requests WHERE user_id = ? ORDER BY date_requested DESC");
 $req->bind_param("i", $student_id);
 $req->execute();
 $myRequests = $req->get_result()->fetch_all(MYSQLI_ASSOC);
@@ -651,17 +651,16 @@ $avatarInitials = strtoupper(substr($student['first_name'], 0, 1) . substr($stud
 
         <div class="dashboard-card">
             <h3>🕒 Office Hours</h3>
-            <p>Monday – Friday </p>
-            <p>8:00 AM – 4:00 PM</p>
+            <p><?php echo site_setting('office_hours', 'Monday to Friday, 8:00 AM – 4:00 PM'); ?></p>
             <p style="margin-top:10px;">Closed during weekends and holidays.</p>
         </div>
 
         <div class="dashboard-card full-width">
             <h3>☎ Contact Information</h3>
             <p><strong>Registrar's Office</strong></p>
-            <p>Email: registrar@hehms.edu.ph</p>
-            <p>Phone: (044) 123-4567</p>
-            <p>Location: Hilario E. Hermosa Memorial High School, Laur, Nueva Ecija</p>
+            <p>Email: <?php echo site_setting('contact_email', 'registrar@hehms.edu.ph'); ?></p>
+            <p>Phone: <?php echo site_setting('contact_phone', '(044) 123-4567'); ?></p>
+            <p>Location: <?php echo site_setting('contact_location', 'Hilario E. Hermosa Memorial High School, Siclong, Laur, Nueva Ecija'); ?></p>
         </div>
     </div>
 
@@ -1447,6 +1446,7 @@ function clearAvatar() {
     
 
     <script src="dashb.js"></script>
+    <script src="../assets/js/session-timeout.js" defer></script>
     <script>
         <?php if ($errorMsg): ?>showView('request');
         <?php endif; ?>

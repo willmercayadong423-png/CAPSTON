@@ -1,7 +1,6 @@
 <?php
-require __DIR__ . '/../database/db.php';
-require __DIR__ . '/../database/config.php';
-require __DIR__ . '/../vendor/autoload.php';
+require __DIR__ . '/../database/db.php';   // db.php already loads config.php (require_once)
+require_once __DIR__ . '/../vendor/autoload.php';
 require __DIR__ . '/../phpLogics/site_config.php';
 
 use PHPMailer\PHPMailer\PHPMailer;
@@ -104,7 +103,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // Match against student_id, date_of_birth, first_name, AND last_name
         $stmt = $conn->prepare("
             SELECT id, first_name, last_name, email, student_id
-            FROM students
+            FROM users
             WHERE student_id    = ?
               AND date_of_birth = ?
               AND LOWER(first_name) = LOWER(?)
@@ -137,7 +136,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $temp_password = generateTempPassword(10);
                     $new_hash      = password_hash($temp_password, PASSWORD_DEFAULT);
 
-                    $upd = $conn->prepare("UPDATE students SET password = ?, plain_password = NULL WHERE id = ?");
+                    $upd = $conn->prepare("UPDATE users SET password = ? WHERE id = ?");
                     $upd->bind_param("si", $new_hash, $student['id']);
                     $upd->execute();
                     $upd->close();
@@ -168,13 +167,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
 
     <link rel="stylesheet" href="mainPageCSS.css">
-    <link rel="stylesheet" href="../assets/css/dark.css">
     <link rel="stylesheet" href="forgotPass.css">
     <?php echo theme_head(); // admin-managed brand color ?>
 
     <!-- Apply dark mode before paint to avoid flash -->
     <script src="forgotPass.js"></script>
-    <script src="../assets/js/dark.js" defer></script>
 </head>
 <body>
 

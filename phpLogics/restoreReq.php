@@ -16,14 +16,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'
 ) {
     $req_id = (int)$_POST['req_id'];
 
+    // ── Guard: restoring must not exceed the 3-pending-requests limit ──
+    $chk = $conn->prepare(
+        "SELECT COUNT(*) AS cnt FROM document_requests
+         WHERE user_id = ? AND status = 'Pending'"
+    );
+    $chk->bind_param("i", $student_id);
+    $chk->execute();
+    $pending = (int)$chk->get_result()->fetch_assoc()['cnt'];
+    $chk->close();
+
+    if ($pending >= 3) {
+        header("Location: ../student/dashboard.php?error=not_found");
+        exit();
+    }
+
     // ── Details for the registrar notification (fetched before the update) ──
     $info = null;
     $q = $conn->prepare(
         "SELECT dr.document_type, dr.purpose,
                 CONCAT(s.first_name,' ',s.last_name) AS student_name
          FROM document_requests dr
-         JOIN students s ON dr.student_id = s.id
-         WHERE dr.id = ? AND dr.student_id = ?"
+         JOIN users s ON dr.user_id = s.id
+         WHERE dr.id = ? AND dr.user_id = ?"
     );
     $q->bind_param("ii", $req_id, $student_id);
     $q->execute();
@@ -35,7 +50,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'
     $restore = $conn->prepare(
         "UPDATE document_requests
          SET status = 'Pending', cancelled_by = NULL, date_released = NULL
-         WHERE id = ? AND student_id = ? AND status = 'Cancelled'
+         WHERE id = ? AND user_id = ? AND status = 'Cancelled'
            AND (cancelled_by = 'student' OR cancelled_by IS NULL OR cancelled_by = '')"
     );
     $restore->bind_param("ii", $req_id, $student_id);
@@ -48,7 +63,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'
         $reqNo = 'REQ-' . str_pad((string) $req_id, 4, '0', STR_PAD_LEFT);
         try {
             $regs = $conn->query(
-                "SELECT email, first_name, last_name FROM students
+                "SELECT email, first_name, last_name FROM users
                  WHERE LOWER(role) = 'registrar' AND LOWER(status) != 'archived'
                    AND email IS NOT NULL AND email <> ''"
             );

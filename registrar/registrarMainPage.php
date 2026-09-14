@@ -22,7 +22,7 @@ function notifyStudentStatus(mysqli $conn, int $req_id, string $newStatus): void
     $q = $conn->prepare(
         "SELECT s.email, s.first_name, s.last_name, dr.document_type
          FROM document_requests dr
-         JOIN students s ON dr.student_id = s.id
+         JOIN users s ON dr.user_id = s.id
          WHERE dr.id = ?"
     );
     $q->bind_param("i", $req_id);
@@ -80,7 +80,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['release_request'])) {
     ];
 
     // Signing-officer default: the registrar currently logged in
-    $q = $conn->prepare("SELECT first_name, last_name FROM students WHERE id = ?");
+    $q = $conn->prepare("SELECT first_name, last_name FROM users WHERE id = ?");
     $q->bind_param("i", $_SESSION['user_id']);
     $q->execute();
     $me = $q->get_result()->fetch_assoc();
@@ -127,7 +127,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['release_request'])) {
 
     // ── Email the certificate to the student ──
     $email = $fullName = null;
-    $q = $conn->prepare("SELECT email, first_name, last_name FROM students WHERE id = ?");
+    $q = $conn->prepare("SELECT email, first_name, last_name FROM users WHERE id = ?");
     $q->bind_param("i", $row['student_pk']);
     $q->execute();
     $stu = $q->get_result()->fetch_assoc();
@@ -224,7 +224,7 @@ $cntReleased   = countWhere($conn, "status = 'Released'");
 $cntToday      = countWhere($conn, "DATE(date_requested) = ?", "s", [$today]);
 
 // ── Fetch registrar info for header ───────────────────────────────
-$reg = $conn->prepare("SELECT * FROM students WHERE id = ?");
+$reg = $conn->prepare("SELECT * FROM users WHERE id = ?");
 $reg->bind_param("i", $_SESSION['user_id']);
 $reg->execute();
 $registrar   = $reg->get_result()->fetch_assoc();
@@ -240,7 +240,7 @@ $regInitials = $registrar
 $mainRows = $conn->query(
     "SELECT dr.*, CONCAT(s.first_name,' ',s.last_name) AS student_name, s.profile_photo
      FROM document_requests dr
-     JOIN students s ON dr.student_id = s.id
+     JOIN users s ON dr.user_id = s.id
      WHERE dr.status NOT IN ('Released','Cancelled')
      ORDER BY dr.date_requested DESC"
 )->fetch_all(MYSQLI_ASSOC);
@@ -251,7 +251,7 @@ $mainRows = $conn->query(
 $archivedRows = $conn->query(
     "SELECT dr.*, CONCAT(s.first_name,' ',s.last_name) AS student_name, s.profile_photo
      FROM document_requests dr
-     JOIN students s ON dr.student_id = s.id
+     JOIN users s ON dr.user_id = s.id
      WHERE dr.status IN ('Released','Cancelled')
      ORDER BY dr.date_requested DESC"
 )->fetch_all(MYSQLI_ASSOC);
@@ -263,7 +263,7 @@ $repeatMap = [];
 $rep = $conn->query(
     "SELECT dr.id,
             (SELECT COUNT(*) FROM document_requests d2
-             WHERE d2.student_id = dr.student_id
+             WHERE d2.user_id = dr.user_id
                AND d2.document_type = dr.document_type
                AND d2.date_requested < dr.date_requested) AS earlier_count
      FROM document_requests dr"
@@ -458,12 +458,10 @@ function renderRow($r, $isArchived = false)
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Registrar Dashboard — HEHMS</title>
     <link rel="stylesheet" href="registrarCSS.css">
-    <link rel="stylesheet" href="../assets/css/dark.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
     <?php echo theme_head(); // admin-managed brand color ?>
-    <script src="../assets/js/dark.js"></script>
 
 </head>
 
@@ -512,7 +510,6 @@ function renderRow($r, $isArchived = false)
 
                 <div class="nav-divider"></div>
                 <div class="nav-group-label">Tools</div>
-                <a href="../phpLogics/setting.php" class="nav-link"><span class="nl-icon">⚙️</span> Settings</a>
 
                 <a href="../phpLogics/Logout.php" class="nav-link"><span class="nl-icon">↪</span> Logout</a>
             </nav>
@@ -668,8 +665,8 @@ function renderRow($r, $isArchived = false)
     </footer>
 
 
-    <?php include(__DIR__ . "/../phpLogics/setting.php"); ?>
     <script src="registrarJS.js"></script>
+    <script src="../assets/js/session-timeout.js" defer></script>
 
     <!-- ══ Request Details Modal ══ -->
     <div id="file-modal">

@@ -60,7 +60,7 @@ try {
     );
 
     // 🔍 Duplicate email check (exclude the student being edited)
-    $dup = $pdo->prepare("SELECT id FROM students WHERE email = ? AND student_id != ?");
+    $dup = $pdo->prepare("SELECT id FROM users WHERE email = ? AND student_id != ?");
     $dup->execute([$email, $student_id]);
     if ($dup->fetch()) {
         echo json_encode(['success' => false, 'message' => 'Email already used by another account']);
@@ -68,7 +68,7 @@ try {
     }
 
     // ── Fetch existing photo ───────────────────────────────────────
-    $stmt = $pdo->prepare("SELECT profile_photo FROM students WHERE student_id = ?");
+    $stmt = $pdo->prepare("SELECT profile_photo FROM users WHERE student_id = ?");
     $stmt->execute([$student_id]);
     $row = $stmt->fetch(PDO::FETCH_ASSOC);
 
@@ -109,9 +109,8 @@ try {
     if (!empty($password)) {
         $hash = password_hash($password, PASSWORD_DEFAULT);
 
-        // New password set → also clear any stored plain_password
         $stmt = $pdo->prepare("
-            UPDATE students
+            UPDATE users
             SET profile_photo = ?,
                 first_name    = ?,
                 last_name     = ?,
@@ -123,8 +122,7 @@ try {
                 grade_level   = ?,
                 strand        = ?,
                 school_year_last_attended = ?,
-                password      = ?,
-                plain_password = NULL
+                password      = ?
             WHERE student_id = ?
         ");
         $stmt->execute([
@@ -145,7 +143,7 @@ try {
 
     } else {
         $stmt = $pdo->prepare("
-            UPDATE students
+            UPDATE users
             SET profile_photo = ?,
                 first_name    = ?,
                 last_name     = ?,

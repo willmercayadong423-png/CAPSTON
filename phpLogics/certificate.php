@@ -33,7 +33,7 @@ function certificate_fetch(mysqli $conn, int $req_id): ?array
                 s.first_name, s.last_name, s.lrn, s.grade_level, s.strand,
                 s.school_year_last_attended
          FROM document_requests dr
-         JOIN students s ON dr.student_id = s.id
+         JOIN users s ON dr.user_id = s.id
          WHERE dr.id = ?"
     );
     $q->bind_param("i", $req_id);

@@ -20,12 +20,12 @@ try {
         [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]
     );
 
-    // Explicit column list — NEVER expose password hashes / plain_password
+    // Explicit column list — NEVER expose password hashes
     $stmt = $pdo->query("
         SELECT id, student_id, first_name, last_name, role, email, contact,
                status, created_at, profile_photo,
                lrn, date_of_birth, grade_level, strand, school_year_last_attended
-        FROM students
+        FROM users
         ORDER BY id DESC
     ");
     $students = $stmt->fetchAll(PDO::FETCH_ASSOC);

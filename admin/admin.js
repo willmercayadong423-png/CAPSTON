@@ -73,8 +73,21 @@ function deleteAnnouncement(id) {
     postAnnouncement('delete', { id: id }, 'Announcement deleted.');
 }
 
-/* ══════════ Site settings ══════════ */
+/* ══════════ Site settings (design theme, colors, info) ══════════ */
 var logoFile = null;
+var selectedTheme = document.querySelector('#theme-picker .theme-option.selected');
+
+function initThemePicker() {
+    document.querySelectorAll('#theme-picker .theme-option').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            document.querySelectorAll('#theme-picker .theme-option').forEach(function (b) {
+                b.classList.remove('selected');
+            });
+            btn.classList.add('selected');
+            selectedTheme = btn;
+        });
+    });
+}
 
 function applyPreviewColor(hex) {
     function mix(a, b, amt) {
@@ -102,6 +115,11 @@ function saveSettings() {
 
     var fd = new FormData();
     fd.append('theme_color', document.getElementById('theme-color').value);
+    fd.append('design_theme', selectedTheme ? selectedTheme.dataset.theme : 'classic');
+    fd.append('office_hours', document.getElementById('set-office-hours').value);
+    fd.append('contact_email', document.getElementById('set-contact-email').value);
+    fd.append('contact_phone', document.getElementById('set-contact-phone').value);
+    fd.append('contact_location', document.getElementById('set-contact-location').value);
     if (logoFile) fd.append('logo', logoFile);
     fd.append('csrf_token', CSRF_TOKEN);
 
@@ -182,7 +200,7 @@ function loadStudents() {
         .then(function (data) { renderStudents(data); })
         .catch(function () {
             document.getElementById('records-tbody').innerHTML =
-                '<tr><td colspan="6"><div class="empty-state"><div class="empty-icon">❌</div><p>Failed to load accounts.</p></div></td></tr>';
+                '<tr><td colspan="7"><div class="empty-state"><div class="empty-icon">❌</div><p>Failed to load accounts.</p></div></td></tr>';
         });
 }
 
@@ -223,17 +241,34 @@ function renderStudents(students) {
             s.lrn || '', s.grade_level || '', s.strand || ''
         ].join(' ').toLowerCase();
 
+        // ── Role badge — clearly identifies Student / Registrar / Admin ──
+        var roleLabel = { student: 'Student', registrar: 'Registrar', admin: 'Admin' }[role]
+                        || escapeHtml(s.role || '—');
+        var roleBadge = '<span class="role-badge role-' + (role || 'other') + '">' + roleLabel + '</span>';
+
+        // ── Status badge (Active / Archived) ──
+        var statusBadge = isArchived
+            ? '<span class="acc-status archived">Archived</span>'
+            : '<span class="acc-status active">Active</span>';
+
+        // ── "View Documents" only makes sense for student accounts —
+        //    registrars and admins never place requests.
+        var viewDocsItem = (role === 'student')
+            ? '<a href="#" class="view-docs">📄 View Documents</a>'
+            : '';
+
         row.innerHTML =
             '<td><strong>' + escapeHtml(s.student_id) + '</strong></td>' +
             '<td><div class="rec-name-cell">' + avatarHtml(s) + '<span>' + fullName + '</span></div></td>' +
-            '<td><span class="badge-grade">' + escapeHtml(s.role) + '</span></td>' +
+            '<td>' + roleBadge + '</td>' +
             '<td><small>' + escapeHtml(s.email) + '</small></td>' +
             '<td>' + contact + '</td>' +
+            '<td>' + statusBadge + '</td>' +
             '<td><div class="dropdown">' +
                 '<button class="dots-btn">⋮</button>' +
                 '<div class="dropdown-content">' +
                     '<a href="#" class="edit">✏️ Edit Record</a>' +
-                    '<a href="#" class="view-docs">📄 View Documents</a>' +
+                    viewDocsItem +
                     (isArchived
                         ? '<a href="#" class="restore">♻️ Unarchive</a>'
                         : '<a href="#" class="delete">📦 Archive</a>') +
@@ -283,7 +318,7 @@ function applyFilters() {
         if (!existing) {
             var noRow = document.createElement('tr');
             noRow.className = 'no-results-row';
-            noRow.innerHTML = '<td colspan="6" style="text-align:center;padding:2rem;color:#888;">No records found for "<strong>' + escapeHtml(search) + '</strong>"</td>';
+            noRow.innerHTML = '<td colspan="7" style="text-align:center;padding:2rem;color:#888;">No records found for "<strong>' + escapeHtml(search) + '</strong>"</td>';
             document.getElementById('records-tbody').appendChild(noRow);
         } else {
             existing.style.display = '';
@@ -652,12 +687,16 @@ function openDocsModal(row) {
 
 function renderDocsModal(body, studentName, counts) {
     var docTypes = [
-        { key: 'good_moral',    label: 'Good Moral',    icon: '🏅' },
-        { key: 'diploma',       label: 'Diploma',       icon: '🎓' },
-        { key: 'form_137',      label: 'Form 137',      icon: '📋' },
-        { key: 'certification', label: 'Certification', icon: '📝' },
-        { key: 'yearbook',      label: 'Yearbook',      icon: '📒' },
-        { key: 'other',         label: 'Other',         icon: '📁' }
+        { key: 'certificate_of_registration',          label: 'Cert. of Registration',    icon: '📝' },
+        { key: 'certificate_of_enrollment',            label: 'Cert. of Enrollment',      icon: '📝' },
+        { key: 'certificate_of_grades',                label: 'Cert. of Grades',          icon: '📊' },
+        { key: 'certificate_of_good_moral',            label: 'Good Moral',               icon: '🏅' },
+        { key: 'certificate_of_transfer',              label: 'Cert. of Transfer',        icon: '🔁' },
+        { key: 'certificate_of_completion_graduation', label: 'Completion / Graduation',  icon: '🎓' },
+        { key: 'sf10_form_137',                        label: 'SF10 / Form 137',         icon: '📋' },
+        { key: 'diploma',                              label: 'Diploma',                  icon: '🎓' },
+        { key: 'yearbook',                             label: 'Yearbook',                 icon: '📒' },
+        { key: 'other',                                label: 'Other',                    icon: '📁' }
     ];
 
     var total = docTypes.reduce(function (sum, d) { return sum + (parseInt(counts[d.key]) || 0); }, 0);
@@ -846,6 +885,9 @@ function executeCsvImport(rows, btn) {
 
 /* ══════════ Boot ══════════ */
 document.addEventListener('DOMContentLoaded', function () {
+
+    // Design theme picker (Site Settings)
+    initThemePicker();
 
     // Views / nav
     var v = new URLSearchParams(window.location.search).get('view');

@@ -20,7 +20,25 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !verifyCsrfToken()) {
 $uploads_fs  = dirname(__DIR__) . '/uploads';
 $uploads_web = 'uploads';
 
-// ── Theme color ───────────────────────────────────────────────────
+// ── Design theme (full look: palette + fonts + radius) ─────────────
+$designTheme = trim((string)($_POST['design_theme'] ?? ''));
+if ($designTheme !== '') {
+    require_once __DIR__ . '/site_config.php';
+    $validThemes = array_keys(design_themes());
+    if (!in_array($designTheme, $validThemes, true)) {
+        echo json_encode(['success' => false, 'message' => 'Unknown design theme.']);
+        exit;
+    }
+    $stmt = $conn->prepare(
+        "INSERT INTO site_settings (setting_key, setting_value) VALUES ('design_theme', ?)
+         ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)"
+    );
+    $stmt->bind_param("s", $designTheme);
+    $stmt->execute();
+    $stmt->close();
+}
+
+// ── Theme color (applies when Design Theme = Classic Academy) ─────────
 $color = trim($_POST['theme_color'] ?? '');
 if ($color !== '') {
     if (!preg_match('/^#[0-9a-fA-F]{6}$/', $color)) {
@@ -32,6 +50,34 @@ if ($color !== '') {
          ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)"
     );
     $stmt->bind_param("s", $color);
+    $stmt->execute();
+    $stmt->close();
+}
+
+// ── Office hours & contact information (admin-editable) ───────────
+$textSettings = [
+    'office_hours'    => ['max' => 100, 'label' => 'Office hours'],
+    'contact_email'   => ['max' => 150, 'label' => 'Registrar email'],
+    'contact_phone'   => ['max' => 50,  'label' => 'Contact phone'],
+    'contact_location'=> ['max' => 255, 'label' => 'Location'],
+];
+foreach ($textSettings as $key => $rule) {
+    $val = trim((string)($_POST[$key] ?? ''));
+    if ($val === '') continue;                       // empty = keep current
+    if (mb_strlen($val) > $rule['max']) {
+        echo json_encode(['success' => false, 'message' => $rule['label'] . ' is too long (max ' . $rule['max'] . ' characters).']);
+        exit;
+    }
+    if ($key === 'contact_email' && !filter_var($val, FILTER_VALIDATE_EMAIL)) {
+        echo json_encode(['success' => false, 'message' => 'Please enter a valid registrar email.']);
+        exit;
+    }
+    $val = htmlspecialchars($val, ENT_QUOTES, 'UTF-8');   // stored escaped, pages print raw
+    $stmt = $conn->prepare(
+        "INSERT INTO site_settings (setting_key, setting_value) VALUES (?, ?)
+         ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)"
+    );
+    $stmt->bind_param("ss", $key, $val);
     $stmt->execute();
     $stmt->close();
 }

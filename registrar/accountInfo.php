@@ -9,7 +9,7 @@ $user_id = (int)$_SESSION['user_id'];
 $csrf    = csrf_token();
 
 // ── Registrar info ────────────────────────────────────────────────
-$s = $conn->prepare("SELECT * FROM students WHERE id = ?");
+$s = $conn->prepare("SELECT * FROM users WHERE id = ?");
 $s->bind_param("i", $user_id);
 $s->execute();
 $me = $s->get_result()->fetch_assoc();
@@ -28,12 +28,10 @@ $myInitials = strtoupper(substr($me['first_name'] ?? 'R', 0, 1) . substr($me['la
     <title>Account Information — HEHMS</title>
     <link rel="stylesheet" href="registrarCSS.css">
     <link rel="stylesheet" href="accountInfo.css">
-    <link rel="stylesheet" href="../assets/css/dark.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
     <?php echo theme_head(); // admin-managed brand color ?>
-    <script src="../assets/js/dark.js"></script>
 </head>
 
 <body>
@@ -79,7 +77,6 @@ $myInitials = strtoupper(substr($me['first_name'] ?? 'R', 0, 1) . substr($me['la
 
                 <div class="nav-divider"></div>
                 <div class="nav-group-label">Tools</div>
-                <a href="../phpLogics/setting.php" class="nav-link"><span class="nl-icon">⚙️</span> Settings</a>
 
                 <a href="../phpLogics/Logout.php" class="nav-link"><span class="nl-icon">↪</span> Logout</a>
             </nav>
@@ -150,6 +147,7 @@ $myInitials = strtoupper(substr($me['first_name'] ?? 'R', 0, 1) . substr($me['la
 
     <script>var CSRF_TOKEN = <?php echo json_encode($csrf); ?>;</script>
     <script src="accountInfo.js"></script>
+    <script src="../assets/js/session-timeout.js" defer></script>
 </body>
 
 </html>

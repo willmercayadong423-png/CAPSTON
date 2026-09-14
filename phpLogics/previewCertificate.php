@@ -28,7 +28,7 @@ if (!$row) {
 }
 
 // The registrar's own name is the default signing officer
-$me = $conn->prepare("SELECT first_name, last_name FROM students WHERE id = ?");
+$me = $conn->prepare("SELECT first_name, last_name FROM users WHERE id = ?");
 $me->bind_param("i", $_SESSION['user_id']);
 $me->execute();
 $reg = $me->get_result()->fetch_assoc();

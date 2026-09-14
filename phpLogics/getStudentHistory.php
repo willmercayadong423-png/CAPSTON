@@ -17,11 +17,11 @@ if (!$req_id) {
 }
 
 // Resolve the student + document type behind this request
-$find = $conn->prepare("SELECT student_id, document_type FROM document_requests WHERE id = ?");
+$find = $conn->prepare("SELECT user_id, document_type FROM document_requests WHERE id = ?");
 $find->bind_param("i", $req_id);
 $find->execute();
 $row        = $find->get_result()->fetch_assoc();
-$student_id = $row['student_id'] ?? null;
+$student_id = $row['user_id'] ?? null;
 $cur_doc    = $row['document_type'] ?? null;
 $find->close();
 
@@ -34,7 +34,7 @@ if (!$student_id) {
 $stu = $conn->prepare(
     "SELECT student_id, first_name, last_name, email, contact, lrn,
             grade_level, strand, school_year_last_attended
-     FROM students WHERE id = ?"
+     FROM users WHERE id = ?"
 );
 $stu->bind_param("i", $student_id);
 $stu->execute();
@@ -46,7 +46,7 @@ $stu->close();
 $same = $conn->prepare(
     "SELECT COUNT(*) AS c, MAX(date_requested) AS last
      FROM document_requests
-     WHERE student_id = ? AND document_type = ? AND id != ?"
+     WHERE user_id = ? AND document_type = ? AND id != ?"
 );
 $same->bind_param("isi", $student_id, $cur_doc, $req_id);
 $same->execute();
@@ -59,7 +59,7 @@ $same->close();
 $hist = $conn->prepare(
     "SELECT id, document_type, status, cancelled_by, date_requested, date_released
      FROM document_requests
-     WHERE student_id = ?
+     WHERE user_id = ?
      ORDER BY date_requested DESC
      LIMIT 20"
 );

@@ -43,7 +43,7 @@ if ($newPassword !== '' && strlen($newPassword) < 5) {
 }
 
 // ── Duplicate email check ─────────────────────────────────────────
-$chk = $conn->prepare("SELECT id FROM students WHERE email = ? AND id != ?");
+$chk = $conn->prepare("SELECT id FROM users WHERE email = ? AND id != ?");
 $chk->bind_param("si", $email, $user_id);
 $chk->execute();
 $chk->store_result();
@@ -55,7 +55,7 @@ if ($chk->num_rows > 0) {
 $chk->close();
 
 // ── Fetch current row (photo) ─────────────────────────────────────
-$s = $conn->prepare("SELECT profile_photo FROM students WHERE id = ?");
+$s = $conn->prepare("SELECT profile_photo FROM users WHERE id = ?");
 $s->bind_param("i", $user_id);
 $s->execute();
 $me = $s->get_result()->fetch_assoc();
@@ -106,15 +106,15 @@ if (isset($_FILES['profile_photo']) && $_FILES['profile_photo']['error'] === UPL
 if ($newPassword !== '') {
     $hash = password_hash($newPassword, PASSWORD_DEFAULT);
     $upd = $conn->prepare(
-        "UPDATE students
+        "UPDATE users
          SET first_name = ?, last_name = ?, email = ?, contact = ?,
-             profile_photo = ?, password = ?, plain_password = NULL
+             profile_photo = ?, password = ?
          WHERE id = ?"
     );
     $upd->bind_param("ssssssi", $first, $last, $email, $contact, $new_photo, $hash, $user_id);
 } else {
     $upd = $conn->prepare(
-        "UPDATE students
+        "UPDATE users
          SET first_name = ?, last_name = ?, email = ?, contact = ?, profile_photo = ?
          WHERE id = ?"
     );

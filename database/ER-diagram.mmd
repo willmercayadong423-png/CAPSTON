@@ -1,0 +1,64 @@
+erDiagram
+    USERS ||--o{ DOCUMENT_REQUESTS : "places (1:N)"
+    USERS ||--o{ ANNOUNCEMENTS : "authors (1:N)"
+
+    USERS {
+        int id PK
+        varchar student_id UK "school number 2026-0001"
+        varchar first_name
+        varchar last_name
+        varchar role "Student | Registrar | Admin"
+        varchar status "active | archived"
+        varchar email UK
+        varchar contact
+        varchar password "bcrypt hash"
+        varchar lrn "Learner Reference No."
+        date date_of_birth
+        varchar grade_level
+        varchar strand
+        varchar school_year_last_attended
+        varchar profile_photo
+        varchar id_front
+        varchar id_back
+        timestamp created_at
+        timestamp updated_at
+    }
+
+    DOCUMENT_REQUESTS {
+        int id PK
+        int student_id FK
+        varchar document_type "Good Moral, SF10, Diploma..."
+        varchar purpose
+        enum status "Pending|Processing|Released|Cancelled"
+        varchar cancelled_by "student|registrar|unclaimed"
+        datetime date_requested
+        datetime date_released
+        timestamp updated_at
+        varchar id_photo "uploaded requirement"
+        varchar auth_letter "uploaded requirement"
+        varchar receipt
+        varchar e_certificate "system-generated PDF"
+        varchar payment_method
+        varchar payment_status "Unpaid by default"
+    }
+
+    ANNOUNCEMENTS {
+        int id PK
+        varchar title
+        text message
+        tinyint is_active "shown on dashboard"
+        int created_by FK "author (SET NULL on delete)"
+        datetime created_at
+    }
+
+    SITE_SETTINGS {
+        varchar setting_key PK "logo_path | theme_color"
+        varchar setting_value
+        timestamp updated_at
+    }
+
+    CREDENTIAL_RESEND_LOG {
+        int id PK
+        varchar email
+        datetime requested_at "rate-limit: 3/hour"
+    }

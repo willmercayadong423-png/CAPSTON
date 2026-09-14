@@ -63,7 +63,7 @@ try {
     );
 
     // 🔍 Check duplicate email
-    $stmt = $pdo->prepare("SELECT id FROM students WHERE email = ?");
+    $stmt = $pdo->prepare("SELECT id FROM users WHERE email = ?");
     $stmt->execute([$email]);
     if ($stmt->fetch()) {
         echo json_encode(['success' => false, 'message' => 'Email already exists']);
@@ -71,7 +71,7 @@ try {
     }
 
     // 🎓 Generate student ID
-    $lastStudent = $pdo->prepare("SELECT student_id FROM students WHERE student_id LIKE ? ORDER BY id DESC LIMIT 1");
+    $lastStudent = $pdo->prepare("SELECT student_id FROM users WHERE student_id LIKE ? ORDER BY id DESC LIMIT 1");
     $lastStudent->execute([$year . '-%']);
     $lastId     = $lastStudent->fetchColumn();
     $seq        = $lastId ? intval(substr($lastId, 5)) + 1 : 1;
@@ -106,7 +106,7 @@ try {
     // NOTE: the plain-text password is intentionally NOT stored anymore.
     // It is emailed once below; "Forgot Credentials" issues a temp password.
     $insert = $pdo->prepare("
-        INSERT INTO students
+        INSERT INTO users
             (student_id, profile_photo, first_name, last_name, role, email, contact,
              lrn, date_of_birth, grade_level, strand, school_year_last_attended,
              status, password)

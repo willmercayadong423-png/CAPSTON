@@ -56,7 +56,9 @@ if (isset($_SESSION["last_activity"]) &&
     session_unset();
     session_destroy();
 
-    header("Location: " . base_url('mainPage.php?timeout=1'));
+    // NOTE: login lives at auth/mainPage.php — the old path (project-root
+    // mainPage.php) 404’d after a timeout.
+    header("Location: " . base_url('auth/mainPage.php?timeout=1'));
     exit();
 }
 

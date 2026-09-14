@@ -27,7 +27,7 @@ if ($type === 'archived') {
 $rows = $conn->query(
     "SELECT dr.*, CONCAT(s.first_name,' ',s.last_name) AS student_name
      FROM document_requests dr
-     JOIN students s ON dr.student_id = s.id
+     JOIN users s ON dr.user_id = s.id
      WHERE {$where}
      ORDER BY dr.date_requested DESC"
 )->fetch_all(MYSQLI_ASSOC);

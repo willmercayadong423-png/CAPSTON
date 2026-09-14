@@ -1571,3 +1571,44 @@ td:nth-child(3) { white-space: normal; min-width: 130px; }
 .preview-actions { display: flex; gap: 8px; margin-bottom: 12px; }
 .btn-full-preview { background: #f0fdf4; color: #166534; border-color: #bbf7d0; }
 .btn-full-preview:hover { background: #dcfce7; }
+
+/* ══════════════════════════════════════════════════════════
+   SIDEBAR HIGHLIGHT PASS — active section instantly readable
+   ══════════════════════════════════════════════════════════ */
+.sidebar {
+    border-right: 1px solid rgba(138, 154, 91, .30);
+    box-shadow: 3px 0 16px rgba(40, 60, 20, .12);
+}
+
+.nav-main-item:hover { background: #eef5e2; }
+
+.nav-main-item.active {
+    background: linear-gradient(90deg, var(--green-pale), rgba(214, 228, 184, .30));
+    box-shadow: inset 4px 0 0 var(--green-mid), 0 3px 10px rgba(107, 143, 58, .20);
+}
+.nav-main-item.active .nmi-icon {
+    background: var(--green-mid);
+    box-shadow: 0 3px 8px rgba(61, 90, 30, .30);
+}
+.nav-main-item.active .nmi-text .nmi-title { color: var(--green-dark); }
+
+/* ══════════════════════════════════════════════════════════
+   HERITAGE LETTERHEAD PASS 🏛️ — registrar side, matching login
+   ══════════════════════════════════════════════════════════ */
+.account-card, .container, .card {
+    background: var(--card-bg, var(--white, #fff));
+    border: 1px solid var(--card-border, rgba(138,154,91,.15));
+}
+
+.save-btn, .btn-release, .btn-release-big {
+    background: var(--btn-grad, linear-gradient(135deg, var(--green-dark), var(--green-mid)));
+    color: var(--btn-ink, #fff);
+    border-bottom: 3px solid rgba(22, 34, 13, .25);
+}
+.save-btn:hover, .btn-release:hover, .btn-release-big:hover { box-shadow: 0 4px 14px rgba(169, 129, 47, .38); }
+
+.title-section { border-left: 4px solid var(--gold); padding-left: 16px; }
+.title-section h1 span { color: var(--gold); }
+
+.welcome-card { border-bottom: 3px solid var(--gold); }
+thead tr { background: linear-gradient(135deg, var(--green-dark), var(--green-mid)); }

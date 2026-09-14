@@ -16,7 +16,7 @@ if (!in_array($field, $allowed, true)) {
     exit('Invalid field');
 }
 
-$stmt = $conn->prepare("SELECT $field AS filepath FROM students WHERE id = ?");
+$stmt = $conn->prepare("SELECT $field AS filepath FROM users WHERE id = ?");
 $stmt->bind_param("i", $student_id);
 $stmt->execute();
 $row = $stmt->get_result()->fetch_assoc();

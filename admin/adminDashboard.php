@@ -9,7 +9,7 @@ $user_id = (int)$_SESSION['user_id'];
 $csrf    = csrf_token();
 
 // ── Admin info ─────────────────────────────────────────────────────
-$s = $conn->prepare("SELECT * FROM students WHERE id = ?");
+$s = $conn->prepare("SELECT * FROM users WHERE id = ?");
 $s->bind_param("i", $user_id);
 $s->execute();
 $me = $s->get_result()->fetch_assoc();
@@ -20,10 +20,13 @@ $myPhoto       = !empty($me['profile_photo']) ? '../' . htmlspecialchars($me['pr
 $myInitials    = strtoupper(substr($me['first_name'] ?? 'A', 0, 1) . substr($me['last_name'] ?? '', 0, 1));
 
 $activeView    = $_GET['view'] ?? 'overview';
+// Legacy URLs may still point at the removed announcements tab — it now
+// lives inside Site Settings.
+if ($activeView === 'announcements') $activeView = 'settings';
 
 // ── Stats ──────────────────────────────────────────────────────────
-$statStudents  = $conn->query("SELECT COUNT(*) FROM students WHERE LOWER(role)='student' AND LOWER(status)!='archived'")->fetch_row()[0];
-$statStaff     = $conn->query("SELECT COUNT(*) FROM students WHERE LOWER(role) IN ('registrar','admin') AND LOWER(status)!='archived'")->fetch_row()[0];
+$statStudents  = $conn->query("SELECT COUNT(*) FROM users WHERE LOWER(role)='student' AND LOWER(status)!='archived'")->fetch_row()[0];
+$statStaff     = $conn->query("SELECT COUNT(*) FROM users WHERE LOWER(role) IN ('registrar','admin') AND LOWER(status)!='archived'")->fetch_row()[0];
 $statPending   = $conn->query("SELECT COUNT(*) FROM document_requests WHERE status='Pending'")->fetch_row()[0];
 $statAnn       = $conn->query("SELECT COUNT(*) FROM announcements WHERE is_active=1")->fetch_row()[0];
 
@@ -32,7 +35,7 @@ $announcements = $conn->query(
     "SELECT a.id, a.title, a.message, a.is_active, a.created_at,
             CONCAT(s.first_name,' ',s.last_name) AS author
      FROM announcements a
-     LEFT JOIN students s ON a.created_by = s.id
+     LEFT JOIN users s ON a.created_by = s.id
      ORDER BY a.created_at DESC"
 )->fetch_all(MYSQLI_ASSOC);
 
@@ -123,15 +126,6 @@ $settings = site_settings();
                     </div>
                 </a>
 
-                <a onclick="showView('announcements')" id="nav-announcements"
-                    class="nav-main-item requests <?php echo $activeView === 'announcements' ? 'active' : ''; ?>">
-                    <div class="nmi-icon">📢</div>
-                    <div class="nmi-text">
-                        <div class="nmi-title">Announcements</div>
-                        <div class="nmi-sub"><?php echo (int)$statAnn; ?> active</div>
-                    </div>
-                </a>
-
                 <a onclick="showView('accounts')" id="nav-accounts"
                     class="nav-main-item records <?php echo $activeView === 'accounts' ? 'active' : ''; ?>">
                     <div class="nmi-icon">🎓</div>
@@ -212,81 +206,20 @@ $settings = site_settings();
 
                         <div class="dashboard-card">
                             <h3>🕒 Office Hours</h3>
-                            <p>Monday – Friday</p>
-                            <p>8:00 AM – 4:00 PM</p>
+                            <p><?php echo site_setting('office_hours', 'Monday to Friday, 8:00 AM – 4:00 PM'); ?></p>
                             <p style="margin-top:10px;">Closed during weekends and holidays.</p>
                         </div>
 
                         <div class="dashboard-card full-width">
                             <h3>☎ Contact Information</h3>
                             <p><strong>Registrar's Office</strong></p>
-                            <p>Email: registrar@hehms.edu.ph</p>
-                            <p>Phone: (044) 123-4567</p>
-                            <p>Location: Hilario E. Hermosa Memorial High School, Laur, Nueva Ecija</p>
+                            <p>Email: <?php echo site_setting('contact_email', 'registrar@hehms.edu.ph'); ?></p>
+                            <p>Phone: <?php echo site_setting('contact_phone', '(044) 123-4567'); ?></p>
+                            <p>Location: <?php echo site_setting('contact_location', 'Hilario E. Hermosa Memorial High School, Siclong, Laur, Nueva Ecija'); ?></p>
                         </div>
                     </div>
 
-                    <button class="save-btn" type="button" onclick="showView('announcements')">📢 New Announcement</button>
-                </div>
-            </div>
-
-            <!-- ════ VIEW 2: ANNOUNCEMENTS ════ -->
-            <div id="view-announcements" style="display:<?php echo $activeView === 'announcements' ? 'block' : 'none'; ?>;">
-                <div class="page-banner">
-                    <div class="page-banner-icon">📢</div>
-                    <div class="page-banner-content">
-                        <h1>Manage <span>Announcements</span></h1>
-                        <p>Active announcements appear on every student dashboard.</p>
-                    </div>
-                </div>
-
-                <div class="account-card">
-                    <h3>➕ New Announcement</h3>
-                    <div class="form-grid">
-                        <div class="form-group full">
-                            <label>Title <span class="req-star">*</span></label>
-                            <input type="text" id="ann-title" maxlength="150" placeholder="e.g. Midyear break schedule">
-                        </div>
-                        <div class="form-group full">
-                            <label>Message <span class="req-star">*</span></label>
-                            <textarea id="ann-message" rows="4" placeholder="Write the announcement details…"></textarea>
-                        </div>
-                    </div>
-                    <button type="button" class="save-btn" id="btn-add-announcement">💾 Publish Announcement</button>
-                </div>
-
-                <div class="account-card">
-                    <h3>📋 All Announcements</h3>
-                    <div id="ann-list">
-                        <?php if (empty($announcements)): ?>
-                            <div class="empty-state">
-                                <div class="empty-icon">📭</div>
-                                <p>No announcements yet.</p>
-                            </div>
-                        <?php else: foreach ($announcements as $a): ?>
-                            <div class="ann-item <?php echo $a['is_active'] ? '' : 'inactive'; ?>">
-                                <div class="ann-head">
-                                    <strong><?php echo htmlspecialchars($a['title']); ?></strong>
-                                    <span class="badge-status <?php echo $a['is_active'] ? 'active' : 'inactive'; ?>">
-                                        <?php echo $a['is_active'] ? 'Active' : 'Hidden'; ?>
-                                    </span>
-                                </div>
-                                <p class="ann-msg"><?php echo nl2br(htmlspecialchars($a['message'])); ?></p>
-                                <div class="ann-meta">
-                                    <small>by <?php echo htmlspecialchars($a['author'] ?? 'System'); ?>
-                                        · <?php echo date('M d, Y g:i A', strtotime($a['created_at'])); ?></small>
-                                    <div class="ann-actions">
-                                        <button type="button" class="btn-edit" style="padding:6px 12px;font-size:.78rem;"
-                                            onclick="toggleAnnouncement(<?php echo (int)$a['id']; ?>)">
-                                            <?php echo $a['is_active'] ? '🙈 Hide' : '👁 Show'; ?>
-                                        </button>
-                                        <button type="button" class="btn-cancel-req"
-                                            onclick="deleteAnnouncement(<?php echo (int)$a['id']; ?>)">🗑 Delete</button>
-                                    </div>
-                                </div>
-                            </div>
-                        <?php endforeach; endif; ?>
-                    </div>
+                    <button class="save-btn" type="button" onclick="showView('settings')">📢 New Announcement</button>
                 </div>
             </div>
 
@@ -339,6 +272,7 @@ $settings = site_settings();
                                 </th>
                                 <th>Email</th>
                                 <th>Contact</th>
+                                <th>Status</th>
                                 <th>Actions</th>
                             </tr>
                         </thead>
@@ -346,7 +280,7 @@ $settings = site_settings();
                     <div class="table-scroll-body">
                         <table>
                             <tbody id="records-tbody">
-                                <tr><td colspan="6">
+                                <tr><td colspan="7">
                                     <div class="empty-state"><div class="empty-icon">⏳</div><p>Loading accounts…</p></div>
                                 </td></tr>
                             </tbody>
@@ -355,13 +289,13 @@ $settings = site_settings();
                 </div>
             </div>
 
-            <!-- ════ VIEW 4: SITE SETTINGS ════ -->
+            <!-- ════ VIEW 4: SITE SETTINGS (branding + info + announcements) ════ -->
             <div id="view-settings" style="display:<?php echo $activeView === 'settings' ? 'block' : 'none'; ?>;">
                 <div class="page-banner">
                     <div class="page-banner-icon">🎨</div>
                     <div class="page-banner-content">
                         <h1>Site <span>Settings</span></h1>
-                        <p>Change the school logo and the theme color used across the system.</p>
+                        <p>Manage the school branding, contact information, and announcements.</p>
                     </div>
                 </div>
 
@@ -381,6 +315,27 @@ $settings = site_settings();
                 </div>
 
                 <div class="account-card">
+                    <h3>🖼️ Design Theme</h3>
+                    <p class="settings-hint">A complete look: colors, fonts, and corner style — applied across every page instantly.</p>
+                    <div class="theme-picker" id="theme-picker">
+                        <?php foreach (design_themes() as $key => $t): ?>
+                            <button type="button" class="theme-option <?php echo (site_setting('design_theme', 'classic') === $key) ? 'selected' : ''; ?>"
+                                data-theme="<?php echo htmlspecialchars($key); ?>"
+                                style="--tp: <?php echo htmlspecialchars($t['primary']); ?>; --ta: <?php echo htmlspecialchars($t['accent']); ?>;">
+                                <span class="to-preview">
+                                    <span class="to-bar"></span>
+                                    <span class="to-line"></span>
+                                    <span class="to-line short"></span>
+                                </span>
+                                <span class="to-name"><?php echo htmlspecialchars($t['emoji'] . ' ' . $t['name']); ?></span>
+                                <span class="to-desc"><?php echo htmlspecialchars($t['desc']); ?></span>
+                            </button>
+                        <?php endforeach; ?>
+                    </div>
+                    <p class="settings-hint" style="margin-top:10px;">ℹ️ Classic Academy uses the custom Theme Color picker below; other themes use their own palette.</p>
+                </div>
+
+                <div class="account-card">
                     <h3>🎨 Theme Color</h3>
                     <p class="settings-hint">Applied to headers, buttons, banners, and highlights on all pages.</p>
                     <div class="settings-row">
@@ -396,7 +351,85 @@ $settings = site_settings();
                     </div>
                 </div>
 
+                <div class="account-card">
+                    <h3>🕒 Office Hours &amp; Contact Information</h3>
+                    <p class="settings-hint">Shown on the login page and every dashboard (Office Hours &amp; Contact cards).</p>
+                    <div class="form-grid">
+                        <div class="form-group full">
+                            <label>Office Hours</label>
+                            <input type="text" id="set-office-hours" maxlength="100"
+                                value="<?php echo htmlspecialchars(site_setting('office_hours', 'Monday to Friday, 8:00 AM – 4:00 PM')); ?>"
+                                placeholder="e.g. Monday to Friday, 8:00 AM – 4:00 PM">
+                        </div>
+                        <div class="form-group">
+                            <label>Registrar Email</label>
+                            <input type="email" id="set-contact-email" maxlength="150"
+                                value="<?php echo htmlspecialchars(site_setting('contact_email', 'registrar@hehms.edu.ph')); ?>">
+                        </div>
+                        <div class="form-group">
+                            <label>Contact Phone</label>
+                            <input type="text" id="set-contact-phone" maxlength="50"
+                                value="<?php echo htmlspecialchars(site_setting('contact_phone', '(044) 123-4567')); ?>">
+                        </div>
+                        <div class="form-group full">
+                            <label>School / Office Location</label>
+                            <input type="text" id="set-contact-location" maxlength="255"
+                                value="<?php echo htmlspecialchars(site_setting('contact_location', 'Hilario E. Hermosa Memorial High School, Siclong, Laur, Nueva Ecija')); ?>">
+                        </div>
+                    </div>
+                </div>
+
                 <button type="button" class="save-btn" id="btn-save-settings">💾 Save Settings</button>
+
+                <!-- ═══ Announcements (managed here) ═══ -->
+                <div class="account-card" style="margin-top:28px;">
+                    <h3>➕ New Announcement</h3>
+                    <div class="form-grid">
+                        <div class="form-group full">
+                            <label>Title <span class="req-star">*</span></label>
+                            <input type="text" id="ann-title" maxlength="150" placeholder="e.g. Midyear break schedule">
+                        </div>
+                        <div class="form-group full">
+                            <label>Message <span class="req-star">*</span></label>
+                            <textarea id="ann-message" rows="4" placeholder="Write the announcement details…"></textarea>
+                        </div>
+                    </div>
+                    <button type="button" class="save-btn" id="btn-add-announcement">💾 Publish Announcement</button>
+                </div>
+
+                <div class="account-card">
+                    <h3>📋 All Announcements</h3>
+                    <div id="ann-list">
+                        <?php if (empty($announcements)): ?>
+                            <div class="empty-state">
+                                <div class="empty-icon">📭</div>
+                                <p>No announcements yet.</p>
+                            </div>
+                        <?php else: foreach ($announcements as $a): ?>
+                            <div class="ann-item <?php echo $a['is_active'] ? '' : 'inactive'; ?>">
+                                <div class="ann-head">
+                                    <strong><?php echo htmlspecialchars($a['title']); ?></strong>
+                                    <span class="badge-status <?php echo $a['is_active'] ? 'active' : 'inactive'; ?>">
+                                        <?php echo $a['is_active'] ? 'Active' : 'Hidden'; ?>
+                                    </span>
+                                </div>
+                                <p class="ann-msg"><?php echo nl2br(htmlspecialchars($a['message'])); ?></p>
+                                <div class="ann-meta">
+                                    <small>by <?php echo htmlspecialchars($a['author'] ?? 'System'); ?>
+                                        · <?php echo date('M d, Y g:i A', strtotime($a['created_at'])); ?></small>
+                                    <div class="ann-actions">
+                                        <button type="button" class="btn-edit" style="padding:6px 12px;font-size:.78rem;"
+                                            onclick="toggleAnnouncement(<?php echo (int)$a['id']; ?>)">
+                                            <?php echo $a['is_active'] ? '🙈 Hide' : '👁 Show'; ?>
+                                        </button>
+                                        <button type="button" class="btn-cancel-req"
+                                            onclick="deleteAnnouncement(<?php echo (int)$a['id']; ?>)">🗑 Delete</button>
+                                    </div>
+                                </div>
+                            </div>
+                        <?php endforeach; endif; ?>
+                    </div>
+                </div>
             </div>
 
             <!-- ════ VIEW 5: ACCOUNT INFORMATION ════ -->
@@ -607,6 +640,7 @@ $settings = site_settings();
 
     <script>var CSRF_TOKEN = <?php echo json_encode($csrf); ?>;</script>
     <script src="admin.js"></script>
+    <script src="../assets/js/session-timeout.js" defer></script>
 </body>
 
 </html>

@@ -24,7 +24,7 @@ if (!isset($_POST['student_id'])) {
 
 $id = trim($_POST['student_id']);
 
-$stmt = $conn->prepare("UPDATE students SET status = 'active' WHERE student_id = ?");
+$stmt = $conn->prepare("UPDATE users SET status = 'active' WHERE student_id = ?");
 
 if (!$stmt) {
     error_log("unArch prepare failed: " . $conn->error);

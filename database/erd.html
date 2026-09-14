@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>HEHMS — Entity Relationship Diagram</title>
+<style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: "Segoe UI", Arial, sans-serif; background: #f4f6f0; color: #1a2409; padding: 36px; }
+    h1 { font-size: 22px; color: #3d5a1e; }
+    h1 span { color: #6b8f3a; }
+    .sub { color: #7a8a65; font-size: 12.5px; margin: 6px 0 26px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); gap: 20px; }
+    .entity { background: #fff; border: 1px solid #d8e0c8; border-radius: 10px; overflow: hidden; box-shadow: 0 2px 10px rgba(40,60,20,.08); }
+    .ehead { background: linear-gradient(135deg,#3d5a1e,#6b8f3a); color: #fff; padding: 10px 14px; display: flex; justify-content: space-between; align-items: center; }
+    .ename { font-weight: 700; font-family: Consolas, monospace; font-size: 14px; }
+    .ecount { font-size: 10.5px; opacity: .85; background: rgba(255,255,255,.15); padding: 2px 8px; border-radius: 99px; }
+    .edesc { background: #f0f7e6; color: #4a5c33; font-size: 11px; padding: 7px 14px; border-bottom: 1px solid #e4ecd6; font-style: italic; }
+    table { width: 100%; border-collapse: collapse; }
+    td { padding: 6px 12px; font-size: 12px; border-bottom: 1px solid #f0f3e8; vertical-align: top; }
+    tr:last-child td { border-bottom: none; }
+    .cn { font-family: Consolas, monospace; font-weight: 600; white-space: nowrap; }
+    .ct { color: #7a8a65; font-family: Consolas, monospace; font-size: 11px; }
+    .cn2 { white-space: nowrap; }
+    .nul { color: #b0532b; font-size: 10px; font-weight: 700; }
+    .nn { color: #6b8f3a; font-size: 10px; font-weight: 700; }
+    .b { font-size: 9px; font-weight: 800; padding: 2px 6px; border-radius: 99px; margin-right: 7px; letter-spacing: .5px; }
+    .pk  { background: #c9a84c; color: #fff; }
+    .uk  { background: #8e44ad; color: #fff; }
+    .fk  { background: #2f6f68; color: #fff; }
+    .idx { background: #d8e0c8; color: #4a5c33; }
+    .cmt { display: block; color: #9aa585; font-size: 10px; font-weight: 400; margin: 1px 0 0 38px; font-family: "Segoe UI", sans-serif; }
+    h2 { font-size: 15px; color: #3d5a1e; margin: 34px 0 12px; }
+    .reltable { width: 100%; background: #fff; border: 1px solid #d8e0c8; border-radius: 10px; border-collapse: separate; border-spacing: 0; overflow: hidden; }
+    .reltable th { background: #f0f7e6; color: #4a5c33; text-align: left; font-size: 11.5px; padding: 9px 14px; text-transform: uppercase; letter-spacing: .6px; }
+    .reltable td { padding: 10px 14px; font-size: 12.5px; }
+    .rel { color: #2f6f68; font-weight: 700; white-space: nowrap; text-align: center; }
+    .note { color: #7a8a65; font-size: 11.5px; }
+    code { background: #f0f7e6; padding: 2px 7px; border-radius: 5px; font-size: 11.5px; }
+    .legend { margin: 18px 0 0; font-size: 11.5px; color: #4a5c33; }
+    .footer { margin-top: 30px; text-align: center; color: #9aa585; font-size: 10.5px; }
+    @media print { body { background: #fff; padding: 10mm; } .entity { box-shadow: none; } }
+</style>
+</head>
+<body>
+    <h1>HEHMS Credential Request &amp; Tracking System — <span>Entity Relationship Diagram</span></h1>
+    <div class="sub">Hilario E. Hermosa Memorial High School · database <code>hehms</code> · generated Sep 14, 2026 from the live schema (database/generate_erd.php)</div>
+
+    <div class="grid"><div class="entity"><div class="ehead"><span class="ename">announcements</span><span class="ecount">1 rows</span></div><div class="edesc">Announcements shown on the student dashboard.</div><table><tr><td class="cn"><span class="b pk">PK</span>id</td><td class="ct">int(11)</td><td class="cn2"><span class="nn">NOT NULL</span></td></tr><tr><td class="cn">title</td><td class="ct">varchar(150)</td><td class="cn2"><span class="nn">NOT NULL</span></td></tr><tr><td class="cn">message</td><td class="ct">text</td><td class="cn2"><span class="nn">NOT NULL</span></td></tr><tr><td class="cn"><span class="b idx">IDX</span>is_active<span class="cmt" title="1 = shown on dashboards">1 = shown on dashboards</span></td><td class="ct">tinyint(1)</td><td class="cn2"><span class="nn">NOT NULL</span></td></tr><tr><td class="cn"><span class="b fk">FK</span>created_by<span class="cmt" title="FK → students.id (author)">FK → students.id (author)</span></td><td class="ct">int(11)</td><td class="cn2"><span class="nul">NULL</span></td></tr><tr><td class="cn">created_at</td><td class="ct">datetime</td><td class="cn2"><span class="nn">NOT NULL</span></td></tr></table></div><div class="entity"><div class="ehead"><span class="ename">credential_resend_log</span><span class="ecount">0 rows</span></div><div class="edesc">Abuse protection for the Forgot-Credentials e-mail flow.</div><table><tr><td class="cn"><span class="b pk">PK</span>id</td><td class="ct">int(11)</td><td class="cn2"><span class="nn">NOT NULL</span></td></tr><tr><td class="cn"><span class="b idx">IDX</span>email</td><td class="ct">varchar(150)</td><td class="cn2"><span class="nn">NOT NULL</span></td></tr><tr><td class="cn"><span class="b idx">IDX</span>requested_at</td><td class="ct">datetime</td><td class="cn2"><span class="nn">NOT NULL</span></td></tr></table></div><div class="entity"><div class="ehead"><span class="ename">document_requests</span><span class="ecount">0 rows</span></div><div class="edesc">Document requests and their full lifecycle.</div><table><tr><td class="cn"><span class="b pk">PK</span>id</td><td class="ct">int(11)</td><td class="cn2"><span class="nn">NOT NULL</span></td></tr><tr><td class="cn"><span class="b fk">FK</span>user_id</td><td class="ct">int(11)</td><td class="cn2"><span class="nn">NOT NULL</span></td></tr><tr><td class="cn">document_type<span class="cmt" title="Certificate of Good Moral, SF10/Form 137, Diploma, …">Certificate of Good Moral, SF10/Fo…</span></td><td class="ct">varchar(150)</td><td class="cn2"><span class="nn">NOT NULL</span></td></tr><tr><td class="cn">purpose<span class="cmt" title="Stated reason (e.g. College application)">Stated reason (e.g. College applic…</span></td><td class="ct">varchar(255)</td><td class="cn2"><span class="nn">NOT NULL</span></td></tr><tr><td class="cn"><span class="b idx">IDX</span>status</td><td class="ct">enum(&#039;Pending&#039;,&#039;Processing&#039;,&#039;Ready for Pickup&#039;,&#039;Released&#039;,&#039;Cancelled&#039;)</td><td class="cn2"><span class="nn">NOT NULL</span></td></tr><tr><td class="cn">cancelled_by<span class="cmt" title="student | registrar (rejected) | unclaimed (legacy)">student | registrar (rejected) | u…</span></td><td class="ct">varchar(20)</td><td class="cn2"><span class="nul">NULL</span></td></tr><tr><td class="cn"><span class="b idx">IDX</span>date_requested</td><td class="ct">datetime</td><td class="cn2"><span class="nul">NULL</span></td></tr><tr><td class="cn">date_released</td><td class="ct">datetime</td><td class="cn2"><span class="nul">NULL</span></td></tr><tr><td class="cn">updated_at</td><td class="ct">timestamp</td><td class="cn2"><span class="nn">NOT NULL</span></td></tr><tr><td class="cn">id_photo<span class="cmt" title="Valid ID (uploads/request_requirements/…)">Valid ID (uploads/request_requirem…</span></td><td class="ct">varchar(255)</td><td class="cn2"><span class="nul">NULL</span></td></tr><tr><td class="cn">auth_letter<span class="cmt" title="Authorization letter (optional)">Authorization letter (optional)</span></td><td class="ct">varchar(255)</td><td class="cn2"><span class="nul">NULL</span></td></tr><tr><td class="cn">receipt<span class="cmt" title="Payment receipt (legacy, in-person payments)">Payment receipt (legacy, in-person…</span></td><td class="ct">varchar(255)</td><td class="cn2"><span class="nul">NULL</span></td></tr><tr><td class="cn">e_certificate<span class="cmt" title="System-generated PDF (uploads/e_certificates/…)">System-generated PDF (uploads/e_ce…</span></td><td class="ct">varchar(255)</td><td class="cn2"><span class="nul">NULL</span></td></tr><tr><td class="cn">payment_method</td><td class="ct">varchar(20)</td><td class="cn2"><span class="nul">NULL</span></td></tr><tr><td class="cn">payment_status</td><td class="ct">varchar(30)</td><td class="cn2"><span class="nn">NOT NULL</span></td></tr></table></div><div class="entity"><div class="ehead"><span class="ename">site_settings</span><span class="ecount">2 rows</span></div><div class="edesc">Key–value store for site branding.</div><table><tr><td class="cn"><span class="b pk">PK</span>setting_key<span class="cmt" title="logo_path | theme_color">logo_path | theme_color</span></td><td class="ct">varchar(50)</td><td class="cn2"><span class="nn">NOT NULL</span></td></tr><tr><td class="cn">setting_value</td><td class="ct">varchar(255)</td><td class="cn2"><span class="nn">NOT NULL</span></td></tr><tr><td class="cn">updated_at</td><td class="ct">timestamp</td><td class="cn2"><span class="nn">NOT NULL</span></td></tr></table></div><div class="entity"><div class="ehead"><span class="ename">users</span><span class="ecount">3 rows</span></div><div class="edesc">User accounts for every role (students, registrar, admin).</div><table><tr><td class="cn"><span class="b pk">PK</span>id</td><td class="ct">int(11)</td><td class="cn2"><span class="nn">NOT NULL</span></td></tr><tr><td class="cn"><span class="b uk">UK</span>student_id<span class="cmt" title="School-issued number (2026-0001). Unique across all roles.">School-issued number (2026-0001). …</span></td><td class="ct">varchar(20)</td><td class="cn2"><span class="nul">NULL</span></td></tr><tr><td class="cn">first_name</td><td class="ct">varchar(100)</td><td class="cn2"><span class="nul">NULL</span></td></tr><tr><td class="cn">last_name</td><td class="ct">varchar(100)</td><td class="cn2"><span class="nul">NULL</span></td></tr><tr><td class="cn"><span class="b idx">IDX</span>role<span class="cmt" title="Student | Registrar | Admin">Student | Registrar | Admin</span></td><td class="ct">varchar(150)</td><td class="cn2"><span class="nul">NULL</span></td></tr><tr><td class="cn"><span class="b idx">IDX</span>status<span class="cmt" title="active | archived">active | archived</span></td><td class="ct">varchar(20)</td><td class="cn2"><span class="nn">NOT NULL</span></td></tr><tr><td class="cn"><span class="b uk">UK</span>email</td><td class="ct">varchar(150)</td><td class="cn2"><span class="nul">NULL</span></td></tr><tr><td class="cn">contact</td><td class="ct">varchar(20)</td><td class="cn2"><span class="nul">NULL</span></td></tr><tr><td class="cn">password<span class="cmt" title="bcrypt hash (password_hash)">bcrypt hash (password_hash)</span></td><td class="ct">varchar(255)</td><td class="cn2"><span class="nul">NULL</span></td></tr><tr><td class="cn">lrn<span class="cmt" title="Learner Reference Number (12 digits)">Learner Reference Number (12 digit…</span></td><td class="ct">varchar(20)</td><td class="cn2"><span class="nul">NULL</span></td></tr><tr><td class="cn">date_of_birth</td><td class="ct">date</td><td class="cn2"><span class="nul">NULL</span></td></tr><tr><td class="cn">grade_level</td><td class="ct">varchar(20)</td><td class="cn2"><span class="nul">NULL</span></td></tr><tr><td class="cn">strand</td><td class="ct">varchar(50)</td><td class="cn2"><span class="nul">NULL</span></td></tr><tr><td class="cn">school_year_last_attended</td><td class="ct">varchar(20)</td><td class="cn2"><span class="nul">NULL</span></td></tr><tr><td class="cn">profile_photo<span class="cmt" title="uploads/profile_photos/…">uploads/profile_photos/…</span></td><td class="ct">varchar(255)</td><td class="cn2"><span class="nul">NULL</span></td></tr><tr><td class="cn">id_front<span class="cmt" title="uploads/id_photos/…">uploads/id_photos/…</span></td><td class="ct">varchar(255)</td><td class="cn2"><span class="nul">NULL</span></td></tr><tr><td class="cn">id_back</td><td class="ct">varchar(255)</td><td class="cn2"><span class="nul">NULL</span></td></tr><tr><td class="cn">created_at</td><td class="ct">timestamp</td><td class="cn2"><span class="nn">NOT NULL</span></td></tr><tr><td class="cn">updated_at</td><td class="ct">timestamp</td><td class="cn2"><span class="nn">NOT NULL</span></td></tr></table></div></div>
+
+    <h2>Relationships &amp; Cardinality</h2>
+    <table class="reltable">
+        <tr><th>Parent (One)</th><th></th><th>Child (Many)</th><th>Notes</th></tr>
+        <tr><td><code>users.id</code></td><td class="rel">1 ─────&lt; N</td><td><code>announcements.created_by</code></td><td class="note"></td></tr><tr><td><code>users.id</code></td><td class="rel">1 ─────&lt; N</td><td><code>document_requests.user_id</code></td><td class="note"></td></tr>
+    </table>
+
+    <div class="legend">
+        <span class="b pk">PK</span> Primary key &nbsp;
+        <span class="b uk">UK</span> Unique key &nbsp;
+        <span class="b fk">FK</span> Foreign key &nbsp;
+        <span class="b idx">IDX</span> Indexed &nbsp;·&nbsp;
+        Engine: InnoDB · Charset: utf8mb4 · All FKs enforced
+    </div>
+
+    <div class="footer">System-generated ERD — regenerate any time with: php database/generate_erd.php</div>
+</body>
+</html>

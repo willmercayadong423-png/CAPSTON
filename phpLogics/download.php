@@ -17,7 +17,7 @@ if (!in_array($field, $allowed, true)) {
     exit('Invalid field');
 }
 
-$stmt = $conn->prepare("SELECT $field AS filepath FROM document_requests WHERE id = ? AND student_id = ?");
+$stmt = $conn->prepare("SELECT $field AS filepath FROM document_requests WHERE id = ? AND user_id = ?");
 $stmt->bind_param("ii", $req_id, $student_id);
 $stmt->execute();
 $row = $stmt->get_result()->fetch_assoc();

@@ -16,7 +16,7 @@ $student_id = $_SESSION['user_id'];
 $req_id     = (int)($_GET['req_id'] ?? 0);
 
 $stmt = $conn->prepare(
-    "SELECT e_certificate FROM document_requests WHERE id = ? AND student_id = ?"
+    "SELECT e_certificate FROM document_requests WHERE id = ? AND user_id = ?"
 );
 $stmt->bind_param("ii", $req_id, $student_id);
 $stmt->execute();

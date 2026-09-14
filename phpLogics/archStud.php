@@ -25,7 +25,7 @@ if (!isset($_POST['student_id'])) {
 $id = trim($_POST['student_id']);
 
 // Never archive your own account (would lock out the registrar)
-$chk = $conn->prepare("SELECT id FROM students WHERE student_id = ?");
+$chk = $conn->prepare("SELECT id FROM users WHERE student_id = ?");
 $chk->bind_param("s", $id);
 $chk->execute();
 $target = $chk->get_result()->fetch_assoc();
@@ -40,7 +40,7 @@ if ((int)$target['id'] === (int)($_SESSION['user_id'] ?? 0)) {
     exit;
 }
 
-$stmt = $conn->prepare("UPDATE students SET status = 'archived' WHERE student_id = ?");
+$stmt = $conn->prepare("UPDATE users SET status = 'archived' WHERE student_id = ?");
 
 if (!$stmt) {
     error_log("archStud prepare failed: " . $conn->error);

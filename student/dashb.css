@@ -134,7 +134,10 @@
 
     .sidebar {
         width: 290px;
-        height: calc(140vh - 174px);
+        /* Stretch with the page content instead of a fixed viewport height —
+           prevents the sidebar being cut off on long pages. min-height keeps
+           it reaching the bottom even on short pages. */
+        min-height: calc(100vh - 74px);
         overflow-y: auto;
         background: var(--cream);
         border-right: 1px solid rgba(138,154,91,.18);
@@ -1735,6 +1738,7 @@ box-shadow:0 6px 18px rgba(0,0,0,.06);
     .sidebar {
         width: 100%;
         height: auto;
+        min-height: 0;   /* override the desktop stretch rule */
         border-right: none;
         border-bottom: 1px solid rgba(138,154,91,.18);
         overflow-x: auto;
@@ -1906,3 +1910,75 @@ box-shadow:0 6px 18px rgba(0,0,0,.06);
 
 /* Student-cancelled badge (its own look, no longer shares "unclaimed") */
 .badge.cancelled { background: #f3f4f6; color: #4b5563; border: 1px solid #e5e7eb; }
+
+/* ══════════════════════════════════════════════════════════
+   SIDEBAR HIGHLIGHT PASS — makes the sidebar clearly visible
+   and the active section instantly recognizable.
+   ══════════════════════════════════════════════════════════ */
+.sidebar {
+    background: #dad9d9;
+    box-shadow: 3px 0 16px rgba(40, 60, 20, .12);
+}
+
+/* Restyled welcome card (was flat gray) */
+.welcome-card {
+    background: linear-gradient(135deg, var(--green-dark), var(--green-mid));
+    box-shadow: 0 6px 14px rgba(61, 90, 30, .28);
+}
+.welcome-card .welcome-text,
+.welcome-card h3 { color: #fff; }
+.welcome-card .welcome-text { color: rgba(255,255,255,.8); }
+
+/* Active item — bold accent bar + tinted gradient + colored icon */
+.nav-main-item:hover { background: #eef5e2; }
+
+.nav-main-item.active {
+    background: linear-gradient(90deg, var(--green-pale), rgba(214, 228, 184, .30));
+    box-shadow: inset 4px 0 0 var(--green-mid), 0 3px 10px rgba(107, 143, 58, .20);
+}
+.nav-main-item.active .nmi-icon {
+    background: var(--green-mid);
+    box-shadow: 0 3px 8px rgba(61, 90, 30, .30);
+}
+.nav-main-item.active .nmi-text .nmi-title { color: var(--green-dark); }
+
+/* Logout link keeps its own quieter styling */
+.nav-main-item.logout.active .nmi-icon { background: #b0532b; }
+
+/* ══════════════════════════════════════════════════════════
+   HERITAGE LETTERHEAD PASS 🏛️ — connects the dashboards to the
+   login page's design (forest ink / parchment / antique gold).
+   Uses --card-bg/--card-border/--btn-grad vars defined by the
+   Heritage theme; other themes keep their defaults via fallbacks.
+   ══════════════════════════════════════════════════════════ */
+
+/* Cards & panels — warm paper with hairline borders */
+.account-card, .dashboard-card, .card, .container {
+    background: var(--card-bg, var(--white, #fff));
+    border: 1px solid var(--card-border, rgba(138,154,91,.18));
+}
+
+/* Primary actions — antique gold like the login button */
+.save-btn, .btn-release-big {
+    background: var(--btn-grad, linear-gradient(135deg, var(--green-dark), var(--green-mid)));
+    color: var(--btn-ink, #fff);
+    border-bottom: 3px solid rgba(22, 34, 13, .25);
+}
+.save-btn:hover, .btn-release-big:hover { box-shadow: 0 4px 14px rgba(169, 129, 47, .38); }
+
+/* Banners — parchment panel, gold spine (login letterhead feel) */
+.page-banner {
+    background: linear-gradient(90deg, var(--green-pale), var(--card-bg, #fff) 150%);
+    border-left: 4px solid var(--gold);
+    border-radius: var(--radius, 16px);
+}
+.page-banner-content h1 span { color: var(--gold); }
+
+/* Welcome card — forest ink like the photo panel scrim */
+.welcome-card {
+    background: linear-gradient(135deg, var(--ink, var(--green-dark)), var(--green-mid));
+    border-bottom: 3px solid var(--gold);
+}
+
+/* Table headers — deep forest */
+thead tr { background: linear-gradient(135deg, var(--green-dark), var(--green-mid)); }

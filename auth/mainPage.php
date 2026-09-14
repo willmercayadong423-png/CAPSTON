@@ -11,7 +11,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['login'])) {
     $email = trim($_POST["username"]);
     $password = trim($_POST["password"]);
 
-    $stmt = $conn->prepare("SELECT * FROM students WHERE email = ? OR student_id = ?");
+    $stmt = $conn->prepare("SELECT * FROM users WHERE email = ? OR student_id = ?");
 $stmt->bind_param("ss", $email, $email);
     $stmt->execute();
     $result = $stmt->get_result();
@@ -34,15 +34,6 @@ $stmt->bind_param("ss", $email, $email);
 
                 session_regenerate_id(true);
 
-                // Clear any stored plain-text password — it is no longer
-                // needed once the student has logged in successfully.
-                if (!empty($row["plain_password"])) {
-                    $clr = $conn->prepare("UPDATE students SET plain_password = NULL WHERE id = ?");
-                    $clr->bind_param("i", $row["id"]);
-                    $clr->execute();
-                    $clr->close();
-                }
-
                 if (strtolower($row["role"]) === "student") {
                     header("Location: ../student/dashboard.php");
                 } elseif (strtolower($row["role"]) === "admin") {
@@ -62,11 +53,11 @@ $stmt->bind_param("ss", $email, $email);
     $stmt->close();
 }
 
-// Hero slider images — replace with real campus/school photos in assets/img/.
-// Add or remove array entries and the slider adjusts automatically.
+// Hero photo panel — replace with real campus/school photos in assets/img/.
+// Add or remove array entries and the panel adjusts automatically.
 $heroSlides = [
     ["img" => "../assets/img/hehms.jpg", "caption" => "Hilario E. Hermosa Memorial High School"],
-    ["img" => "../assets/img/inservice.jpg", "caption" => "Committed to Academic Excellence"],
+    ["img" => "../assets/img/inservice.jpg", "caption" => "In-Service Training"],
     ["img" => "../assets/img/by.jpg", "caption" => "School Activities"],
 ];
 ?>
@@ -82,152 +73,124 @@ $heroSlides = [
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 
-    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,500;0,9..144,600;0,9..144,700;1,9..144,400;1,9..144,500&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 </head>
 
 <body>
 
-    <div class="header">
-        <div class="logo-wrap">
-            <a href="mainPage.php">
-                <img src="<?php echo site_logo_url(); ?>" alt="School Logo" class="logo-img">
-            </a>
-            <a href="mainPage.php" class="school-info">
-                <h2>Hilario E. Hermosa Memorial High School</h2>
-                <p>Siclong, Laur, Nueva Ecija</p>
-            </a>
-        </div>
+    <div class="portal">
 
-        <div class="header-right">
-            <span class="office-hours">Office Hours: Mon–Fri, 8:00 AM–4:00 PM</span>
-        </div>
-    </div>
+        <!-- ── LEFT — full-bleed auto-sliding photo panel ── -->
+        <section class="photo-panel" id="heroSlider" aria-label="School gallery">
 
-    <main class="main-content">
-
-        <div class="left-content">
-
-            <!-- ── AUTO-SLIDING HERO — appears before all text content ── -->
-            <div class="hero-slider" id="heroSlider">
-                <div class="hero-slides">
-                    <?php foreach ($heroSlides as $i => $slide): ?>
-                        <div class="slide<?php echo $i === 0 ? ' active' : ''; ?>"
-                            style="background-image:url('<?php echo htmlspecialchars($slide['img']); ?>')">
-                            <div class="slide-caption"><?php echo htmlspecialchars($slide['caption']); ?></div>
+            <div class="photo-panel__slides">
+                <?php foreach ($heroSlides as $i => $slide): ?>
+                    <div class="slide<?php echo $i === 0 ? ' active' : ''; ?>"
+                        style="background-image:url('<?php echo htmlspecialchars($slide['img']); ?>')">
+                        <div class="slide-meta">
+                            <p class="slide-caption"><?php echo htmlspecialchars($slide['caption']); ?></p>
                         </div>
+                    </div>
+                <?php endforeach; ?>
+                <div class="photo-panel__scrim"></div>
+            </div>
+
+            <div class="letterhead">
+                <img src="<?php echo site_logo_url(); ?>" alt="" class="letterhead__seal">
+                <span class="letterhead__name">Hilario E. Hermosa Memorial High School</span>
+            </div>
+
+            <div class="photo-panel__content">
+                <h1>Every record, one request away.</h1>
+                <p class="lead">
+                    Request Form 137, diplomas, and other academic documents online,
+                    then follow each one from submission to release — no campus visit required.
+                </p>
+
+                <div class="info-row">
+                    <div class="info-row__item">
+                        <strong>Request documents</strong>
+                        <span>Form 137, diplomas, Good Moral, and more.</span>
+                    </div>
+                    <div class="info-row__item">
+                        <strong>Track progress</strong>
+                        <span>Follow a request from received to ready for release.</span>
+                    </div>
+                    <div class="info-row__item">
+                        <strong>Secure records</strong>
+                        <span>Pulled directly from the registrar's database.</span>
+                    </div>
+                </div>
+            </div>
+
+            <?php if (count($heroSlides) > 1): ?>
+                <div class="slide-dots">
+                    <?php foreach ($heroSlides as $i => $slide): ?>
+                        <button type="button" class="dot<?php echo $i === 0 ? ' active' : ''; ?>"
+                            data-index="<?php echo $i; ?>" aria-label="Show photo <?php echo $i + 1; ?>"></button>
                     <?php endforeach; ?>
-                    <div class="hero-gradient"></div>
+                </div>
+            <?php endif; ?>
+        </section>
+
+        <!-- ── RIGHT — sign-in ── -->
+        <section class="login-panel">
+            <div class="login-panel__inner">
+
+                <div class="crest-mark">
+                    <img src="<?php echo site_logo_url(); ?>" alt="Logo" class="crest-mark__img">
                 </div>
 
-                <?php if (count($heroSlides) > 1): ?>
-                    <div class="slide-dots">
-                        <?php foreach ($heroSlides as $i => $slide): ?>
-                            <span class="dot<?php echo $i === 0 ? ' active' : ''; ?>" data-index="<?php echo $i; ?>"></span>
-                        <?php endforeach; ?>
-                    </div>
-                <?php endif; ?>
-            </div>
+                <h2 class="school-name">Hilario E. Hermosa Memorial High School</h2>
+                <p class="school-address">Siclong, Laur, Nueva Ecija</p>
 
-            <div class="badge">Official Student Portal</div>
-            <div class="title-section">
-                <h1>Credential Request and Tracking System</h1>
+                <div class="rule"></div>
 
-                <p>
-                    The official online system for Hilario E. Hermosa Memorial High School
-                    students and alumni to request and track academic documents.
-                </p>
+                <p class="signin-label">Sign in to continue</p>
 
-                <p class="note">
-                    <b>Reminder:</b> Please ensure all required documents are ready before
-                    submitting a request, and bring a valid ID when claiming requested documents.
-                </p>
-            </div>
+                <form method="POST" novalidate>
 
-            <div class="features">
-                <div class="feature-box">
-                    <div class="ficon-wrap"><img src="../assets/img/notebook.png" alt="request" class="ficon-img"></div>
-                    <h3>Document Requests</h3>
-                    <p>Request Form 137, Diplomas, Good Moral and other records online.</p>
-                </div>
-                <div class="feature-box">
-                    <div class="ficon-wrap"><img src="../assets/img/magnifier.png" alt="tracking" class="ficon-img"></div>
-                    <h3>Status Tracking</h3>
-                    <p>Monitor each request from submission through to release.</p>
-                </div>
-                <div class="feature-box">
-                    <div class="ficon-wrap"><img src="../assets/img/encrypted.png" alt="secure" class="ficon-img"></div>
-                    <h3>Secure Records</h3>
-                    <p>Records are retrieved securely from the school's central database.</p>
-                </div>
-            </div>
-
-        </div>
-
-        <div class="login-placeholder">
-            <div class="login-card">
-
-                <div class="logo-circle">
-                    <img src="<?php echo site_logo_url(); ?>" alt="Logo" class="logoLogin">
-                </div>
-
-                <div class="loginText">
-                    Hilario E. Hermosa Memorial<br>High School (HEHMS)
-                </div>
-
-                <div class="divider"><span>Sign in to your account</span></div>
-
-                <form method="POST">
-
-                    <label class="login-label">Username</label>
-                    <div class="input-wrap">
-                        <input type="text" name="username" required>
+                    <div class="field">
+                        <label for="username">Username</label>
+                        <input type="text" name="username" id="username" required autocomplete="username">
                     </div>
 
-                    <label class="login-label">Password</label>
-<div class="input-wrap password-wrap">
-    <input type="password" name="password" id="password" required>
+                    <div class="field field--password">
+                        <label for="password">Password</label>
+                        <input type="password" name="password" id="password" required autocomplete="current-password">
+                        <button type="button" class="password-toggle" id="togglePassword" aria-label="Show password">👁</button>
+                    </div>
 
-    <button type="button" class="password-toggle" id="togglePassword">
-        👁
-    </button>
-</div>
-
-                    <button type="submit" name="login" class="login-btn">Sign In</button>
+                    <button type="submit" name="login" class="btn-primary">Sign in</button>
 
                 </form>
 
                 <?php if ($errorMessage): ?>
-                    <div class="message">⚠ <?php echo htmlspecialchars($errorMessage); ?></div>
+                    <div class="notice">⚠ <?php echo htmlspecialchars($errorMessage); ?></div>
                 <?php endif; ?>
 
                 <?php if (isset($_GET['loggedout'])): ?>
-                    <div class="message message-success">
-                        You have been logged out.
-                    </div>
+                    <div class="notice notice--success">You have been logged out.</div>
                 <?php endif; ?>
 
                 <?php if (isset($_GET['timeout'])): ?>
-                    <div class="message">Your session has expired. Please log in again.</div>
+                    <div class="notice">Your session has expired. Please log in again.</div>
                 <?php endif; ?>
 
-                <p class="forgot-link">Forgot Password? <a href="forgotPassword.php">Click here</a></p>
+                <p class="forgot">Forgot password? <a href="forgotPassword.php">Click here</a></p>
+
+                <div class="panel-footer">
+                    
+                    <p>© 2026 Hilario E. Hermosa Memorial High School. All rights reserved.</p>
+                </div>
 
             </div>
-        </div>
+        </section>
 
-    </main>
-
-    <footer class="footer">
-        <div class="footer-container">
-            <div class="footer-center">
-                <p class="footer-title">Hilario E. Hermosa Memorial High School</p>
-                <p>&copy; 2026 All rights reserved. Credential Request &amp; Tracking System.</p>
-            </div>
-        </div>
-    </footer>
+    </div>
 
     <script>
-        // ── Auto-sliding hero carousel ──────────────────────────────
+        // ── Auto-sliding hero photo panel ──────────────────────────────
         (function () {
             const slider = document.getElementById('heroSlider');
             if (!slider) return;
@@ -238,7 +201,7 @@ $heroSlides = [
 
             let current = 0;
             let timer = null;
-            const INTERVAL_MS = 5000;
+            const INTERVAL_MS = 5500;
 
             function goTo(index) {
                 slides[current].classList.remove('active');
@@ -274,22 +237,19 @@ $heroSlides = [
             start();
         })();
 
+        // ── Password visibility toggle ──────────────────────────────
+        const passwordInput = document.getElementById("password");
+        const togglePassword = document.getElementById("togglePassword");
 
-const passwordInput = document.getElementById("password");
-    const togglePassword = document.getElementById("togglePassword");
-
-    togglePassword.addEventListener("click", function () {
-        if (passwordInput.type === "password") {
-            passwordInput.type = "text";
-            togglePassword.textContent = "🙈";
-        } else {
-            passwordInput.type = "password";
-            togglePassword.textContent = "👁";
-        }
-    });
-
-
-
+        togglePassword.addEventListener("click", function () {
+            if (passwordInput.type === "password") {
+                passwordInput.type = "text";
+                togglePassword.textContent = "🙈";
+            } else {
+                passwordInput.type = "password";
+                togglePassword.textContent = "👁";
+            }
+        });
     </script>
 
 </body>

@@ -32,8 +32,7 @@ if (!$student_id) {
 
 // ── Student profile (for the registrar verification panel) ────────
 $stu = $conn->prepare(
-    "SELECT student_id, first_name, last_name, email, contact, lrn,
-            grade_level, strand, school_year_last_attended
+    "SELECT student_id, first_name, last_name, email, contact, lrn
      FROM users WHERE id = ?"
 );
 $stu->bind_param("i", $student_id);

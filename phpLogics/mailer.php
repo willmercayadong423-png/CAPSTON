@@ -7,9 +7,11 @@
  * so no passwords live in this file.
  *
  * Public functions (the "API"):
- *   send_status_email($toEmail, $toName, $reqNo, $docType, $status)
+ *   send_status_email($toEmail, $toName, $reqNo, $docType, $status, $reason = null)
  *       → notifies a student that their request status changed
- *         (Processing / Released / legacy "Ready for Pickup")
+ *         (Pending = received/confirmation · Processing / Released /
+ *         legacy "Ready for Pickup" · Rejected = registrar rejection,
+ *         $reason carries the registrar's written reason)
  *   send_certificate_email($toEmail, $toName, $reqNo, $docType, $certWebPath)
  *       → delivers the released e-certificate as an email attachment
  *
@@ -31,6 +33,8 @@ function mailer_init(string $subject, string $toEmail, string $toName): PHPMaile
     $mail->Password   = SMTP_PASS;
     $mail->SMTPSecure = PHPMailer\PHPMailer\PHPMailer::ENCRYPTION_STARTTLS;
     $mail->Port       = SMTP_PORT;
+    $mail->CharSet    = 'UTF-8';
+    $mail->Encoding   = 'base64';
     $mail->setFrom(SMTP_FROM, SMTP_FROM_NAME);
     $mail->addAddress($toEmail, $toName);
     $mail->isHTML(true);
@@ -78,9 +82,33 @@ function mailer_info_table(string $reqNo, string $docType, string $status): stri
 /* ═══════════════════════════════════════════════════════════════════
  * API 1 — Status-change notification
  * ═══════════════════════════════════════════════════════════════════ */
-function send_status_email(string $toEmail, string $toName, string $reqNo, string $docType, string $status): array
+function send_status_email(string $toEmail, string $toName, string $reqNo, string $docType, string $status, ?string $reason = null): array
 {
     switch ($status) {
+        case 'Pending':   // submission confirmation — "we received your request"
+            $subject = 'Request received — HEHMS';
+            $body    = "<p style='color:#555;'>Your request has been "
+                     . "<strong style='color:#166534;'>received</strong> and is now in the Registrar's "
+                     . "<strong>Pending</strong> queue.</p>"
+                     . "<p style='color:#555;'>You will receive another email as soon as your request is "
+                     . "accepted for processing. You can also track its status anytime in your HEHMS "
+                     . "account under <strong>My Requests</strong>.</p>";
+            break;
+
+        case 'Rejected':  // registrar rejected the request — reason included
+            $subject = 'Your request was rejected — HEHMS';
+            $reasonHtml = $reason
+                ? "<div style='background:#fdf3f3;border:1px solid #e3c8c8;border-radius:8px;padding:12px 14px;margin:14px 0;'>"
+                 . "<p style='margin:0;font-size:12px;color:#9c2b2b;font-weight:700;'>&#9888; REASON FOR REJECTION</p>"
+                 . "<p style='margin:6px 0 0;color:#5a3a3a;'>" . htmlspecialchars($reason) . "</p></div>"
+                : '';
+            $body    = "<p style='color:#555;'>Unfortunately, your request has been "
+                     . "<strong style='color:#b33;'>rejected</strong> by the Registrar's Office.</p>"
+                     . $reasonHtml
+                     . "<p style='color:#555;'>If you can complete the missing requirements, you may submit "
+                     . "a new request through your HEHMS account.</p>";
+            break;
+
         case 'Processing':
             $subject = 'Your request has been accepted — HEHMS';
             $body    = "<p style='color:#555;'>Good news! Your request has been "

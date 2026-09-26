@@ -21,12 +21,17 @@ $stmt->bind_param("i", $student_id);
 $stmt->execute();
 $row = $stmt->get_result()->fetch_assoc();
 
+// Check the row BEFORE touching it (fetch_assoc returns null when no row)
+if (!$row || empty($row['filepath'])) {
+    http_response_code(404);
+    exit('Not found');
+}
 
 $path = __DIR__ . '/../' . $row['filepath'];
 
-if (!$row || empty($row['filepath']) || !file_exists($path)) {
+if (!file_exists($path)) {
     http_response_code(404);
-    exit('Not found');
+    exit('File not found');
 }
 
 $mime = mime_content_type($path);

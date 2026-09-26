@@ -6,7 +6,7 @@
 
 /* ══════════ View switcher ══════════ */
 function showView(view) {
-    ['overview', 'announcements', 'accounts', 'settings', 'account'].forEach(function (v) {
+    ['overview', 'announcements', 'accounts', 'settings', 'information', 'audit', 'account'].forEach(function (v) {
         var el = document.getElementById('view-' + v);
         if (el) el.style.display = (v === view) ? 'block' : 'none';
         var nav = document.getElementById('nav-' + v);
@@ -114,12 +114,10 @@ function saveSettings() {
     btn.textContent = '⏳ Saving…';
 
     var fd = new FormData();
+    // Site Settings = branding only (logo, design theme, theme color).
+    // Office hours / contact info are saved from the Information view.
     fd.append('theme_color', document.getElementById('theme-color').value);
     fd.append('design_theme', selectedTheme ? selectedTheme.dataset.theme : 'classic');
-    fd.append('office_hours', document.getElementById('set-office-hours').value);
-    fd.append('contact_email', document.getElementById('set-contact-email').value);
-    fd.append('contact_phone', document.getElementById('set-contact-phone').value);
-    fd.append('contact_location', document.getElementById('set-contact-location').value);
     if (logoFile) fd.append('logo', logoFile);
     fd.append('csrf_token', CSRF_TOKEN);
 
@@ -142,6 +140,149 @@ function saveSettings() {
         });
 }
 
+/* ══════════ Information view: office hours & contact info ══════════ */
+function saveInfo() {
+    var btn = document.getElementById('btn-save-info');
+    btn.disabled = true;
+    btn.textContent = '⏳ Saving…';
+
+    var fd = new FormData();
+    fd.append('office_hours',      document.getElementById('set-office-hours').value.trim());
+    fd.append('contact_email',     document.getElementById('set-contact-email').value.trim());
+    fd.append('contact_phone',     document.getElementById('set-contact-phone').value.trim());
+    fd.append('contact_location',  document.getElementById('set-contact-location').value.trim());
+    fd.append('csrf_token', CSRF_TOKEN);
+
+    fetch('../phpLogics/saveSiteSettings.php', { method: 'POST', body: fd })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+            if (data.success) {
+                showToast('Information saved!', 'success');
+                setTimeout(function () { location.reload(); }, 800);
+            } else {
+                btn.disabled = false;
+                btn.textContent = '💾 Save Information';
+                showToast(data.message || 'Failed to save information.', 'error');
+            }
+        })
+        .catch(function () {
+            btn.disabled = false;
+            btn.textContent = '💾 Save Information';
+            showToast('Network error. Please try again.', 'error');
+        });
+}
+
+/* ══════════ Information view: requestable documents ══════════ */
+function loadDocTypes() {
+    var box = document.getElementById('doc-type-list');
+    if (!box) return;
+
+    fetch('../phpLogics/documentTypeAction.php?action=list')
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+            if (data.success) renderDocTypes(data.items || []);
+            else box.innerHTML = '<p class="empty-state">Failed to load documents.</p>';
+        })
+        .catch(function () {
+            box.innerHTML = '<p class="empty-state">Failed to load documents.</p>';
+        });
+}
+
+function renderDocTypes(items) {
+    var box = document.getElementById('doc-type-list');
+    if (!box) return;
+
+    if (!items.length) {
+        box.innerHTML = '<div class="empty-state"><div class="empty-icon">📄</div>' +
+            '<p>No documents yet — students cannot request anything until one is added.</p></div>';
+        return;
+    }
+
+    var html = '';
+    items.forEach(function (it) {
+        var id      = parseInt(it.id, 10);
+        var active  = parseInt(it.is_active, 10) === 1;
+        var needsGl = parseInt(it.requires_grade_level, 10) === 1;
+        var used    = parseInt(it.usage_count, 10) || 0;
+
+        html += '<div class="doc-item' + (active ? '' : ' inactive') + '">' +
+                '<span class="doc-item-name">📄 ' + escapeHtml(it.name) + '</span>' +
+                '<span class="doc-chip ' + (active ? 'active' : 'inactive') + '">' + (active ? 'Active' : 'Removed') + '</span>' +
+                (needsGl ? '<span class="doc-chip gl" title="The request form asks for the Grade Level">+ Grade Level</span>' : '') +
+                '<span class="doc-usage">' + used + ' request' + (used === 1 ? '' : 's') + '</span>' +
+                '<span class="doc-item-actions">' +
+                    (active
+                        ? '<button type="button" class="btn-cancel-req" onclick="toggleDocType(' + id + ', \'remove\')">📦 Remove</button>'
+                        : '<button type="button" class="btn-edit" onclick="toggleDocType(' + id + ', \'restore\')">♻️ Restore</button>') +
+                    (used === 0
+                        ? '<button type="button" class="btn-cancel-req" onclick="deleteDocType(' + id + ', ' + JSON.stringify(it.name) + ')">🗑 Delete</button>'
+                        : '') +
+                '</span>' +
+            '</div>';
+    });
+
+    box.innerHTML = html;
+}
+
+function postDocType(action, extra, doneMsg) {
+    var fd = new FormData();
+    fd.append('action', action);
+    fd.append('csrf_token', CSRF_TOKEN);
+    Object.keys(extra || {}).forEach(function (k) { fd.append(k, extra[k]); });
+
+    return fetch('../phpLogics/documentTypeAction.php', { method: 'POST', body: fd })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+            if (data.success) {
+                showToast(data.message || doneMsg, data.deactivated ? 'success' : 'success');
+                loadDocTypes();
+            } else {
+                showToast(data.message || 'Something went wrong.', 'error');
+            }
+        })
+        .catch(function () { showToast('Network error. Please try again.', 'error'); });
+}
+
+function addDocType() {
+    var nameEl  = document.getElementById('doc-type-name');
+    var errEl   = document.getElementById('err-doc-type');
+    var glEl    = document.getElementById('doc-type-gl');
+    var name    = nameEl.value.trim();
+
+    errEl.textContent = '';
+    errEl.style.display = 'none';
+
+    if (!name) {
+        errEl.textContent = 'Please enter the document name.';
+        errEl.style.display = 'block';
+        nameEl.focus();
+        return;
+    }
+
+    var btn = document.getElementById('btn-add-doc-type');
+    btn.disabled = true;
+
+    postDocType('add', { name: name, requires_grade_level: glEl.checked ? '1' : '' }, 'Document added.')
+        .then(function () {
+            btn.disabled = false;
+            nameEl.value = '';
+            if (glEl) glEl.checked = false;
+        });
+}
+
+function toggleDocType(id, mode) {
+    var question = mode === 'remove'
+        ? 'Remove this document from the student request form?\n\nExisting requests keep it in their history.'
+        : 'Restore this document to the student request form?';
+    if (!confirm(question)) return;
+    postDocType('toggle', { id: id }, mode === 'remove' ? 'Document removed.' : 'Document restored.');
+}
+
+function deleteDocType(id, name) {
+    if (!confirm('Permanently delete "' + name + '"?\n\nThis document was never requested, so nothing else will change.')) return;
+    postDocType('delete', { id: id }, 'Document deleted.');
+}
+
 /* ══════════ Own account ══════════ */
 var photoFile = null;
 
@@ -151,9 +292,16 @@ function saveAccount() {
     var email    = document.getElementById('acc-email').value.trim();
     var contact  = document.getElementById('acc-contact').value.trim();
     var password = document.getElementById('acc-password').value;
+    var currentPwEl = document.getElementById('acc-current-password');
+    var currentPw   = currentPwEl ? currentPwEl.value : '';
 
     if (!first || !last) { showToast('First and last name are required.', 'error'); return; }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { showToast('Please enter a valid email.', 'error'); return; }
+    // A password change must be authorized by the CURRENT password
+    if (password && !currentPw) {
+        showToast('Please enter your current password to set a new one.', 'error');
+        return;
+    }
 
     var btn = document.getElementById('btn-save-account');
     btn.disabled = true;
@@ -163,7 +311,10 @@ function saveAccount() {
     fd.append('last_name', last);
     fd.append('email', email);
     fd.append('contact', contact);
-    if (password) fd.append('password', password);
+    if (password) {
+        fd.append('password', password);
+        fd.append('current_password', currentPw);
+    }
     if (photoFile) fd.append('profile_photo', photoFile);
     fd.append('csrf_token', CSRF_TOKEN);
 
@@ -221,24 +372,24 @@ function renderStudents(students) {
             if (role === 'registrar' || role === 'admin') registrars++;
         }
 
-        var contact = escapeHtml(s.contact_number || s.contact || '');
+        var contact = String(s.contact_number || s.contact || '');
         var row     = document.createElement('tr');
         row.className            = isArchived ? 'view-alumni' : 'view-enrolled';
         row.dataset.profilePhoto = s.profile_photo || '';
         row.dataset.id           = s.student_id;
-        row.dataset.fullname     = fullName;
+        // ⚠ Store RAW values here — dataset assignment is attribute-safe by
+        // itself. Storing pre-escaped values made the edit form write back
+        // "O&#039;Brien" into the DB on save. Escape only when rendering HTML
+        // (see fullName / roleBadge / the row.innerHTML below).
+        row.dataset.fullname     = (s.first_name + ' ' + s.last_name).trim();
         row.dataset.role         = s.role;
         row.dataset.email        = s.email;
         row.dataset.contact      = contact;
         row.dataset.lrn          = s.lrn                        || '';
-        row.dataset.dob          = s.date_of_birth              || '';
-        row.dataset.grade        = s.grade_level                || '';
-        row.dataset.strand       = s.strand                     || '';
-        row.dataset.syear        = s.school_year_last_attended  || '';
 
         row.dataset.searchIndex = [
-            s.student_id, fullName, s.role, s.email, contact,
-            s.lrn || '', s.grade_level || '', s.strand || ''
+            s.student_id, row.dataset.fullname, s.role, s.email, contact,
+            s.lrn || ''
         ].join(' ').toLowerCase();
 
         // ── Role badge — clearly identifies Student / Registrar / Admin ──
@@ -262,7 +413,7 @@ function renderStudents(students) {
             '<td><div class="rec-name-cell">' + avatarHtml(s) + '<span>' + fullName + '</span></div></td>' +
             '<td>' + roleBadge + '</td>' +
             '<td><small>' + escapeHtml(s.email) + '</small></td>' +
-            '<td>' + contact + '</td>' +
+            '<td>' + escapeHtml(contact) + '</td>' +
             '<td>' + statusBadge + '</td>' +
             '<td><div class="dropdown">' +
                 '<button class="dots-btn">⋮</button>' +
@@ -461,28 +612,9 @@ function openEditModal(row) {
     document.getElementById('f-password').value = '';
 
     var lrnEl    = document.getElementById('f-lrn');
-    var dobEl    = document.getElementById('f-dob');
-    var gradeEl  = document.getElementById('f-grade');
-    var strandEl = document.getElementById('f-strand');
-    var syearEl  = document.getElementById('f-syear');
 
     if (lrnEl)    lrnEl.value    = row.dataset.lrn    || '';
-    if (dobEl)    dobEl.value    = row.dataset.dob    || '';
-    if (gradeEl)  gradeEl.value  = row.dataset.grade  || '';
-    if (strandEl) strandEl.value = row.dataset.strand || '';
-    if (syearEl)  syearEl.value  = row.dataset.syear  || '';
 
-    var strandGrp = document.getElementById('group-strand');
-    if (gradeEl && strandGrp) {
-        var shs = ['Grade 11', 'Grade 12'];
-        if (!shs.includes(gradeEl.value)) {
-            strandGrp.style.opacity      = '0.45';
-            strandGrp.style.pointerEvents = 'none';
-        } else {
-            strandGrp.style.opacity      = '';
-            strandGrp.style.pointerEvents = '';
-        }
-    }
 
     document.getElementById('addModalTitle').textContent  = '✏️ Edit Information';
     document.getElementById('pw-required').style.display  = 'none';
@@ -521,7 +653,7 @@ function closeAddModal() {
 
 function resetForm() {
     ['f-first', 'f-last', 'f-email', 'f-contact', 'f-password',
-     'f-lrn', 'f-dob', 'f-syear'].forEach(function (id) {
+     'f-lrn'].forEach(function (id) {
         var el = document.getElementById(id);
         if (!el) return;
         el.value = '';
@@ -533,16 +665,11 @@ function resetForm() {
         }
     });
 
-    ['f-role', 'f-grade', 'f-strand'].forEach(function (id) {
+    ['f-role'].forEach(function (id) {
         var el = document.getElementById(id);
         if (el) { el.value = ''; el.classList.remove('error'); }
     });
 
-    var strandGrp = document.getElementById('group-strand');
-    if (strandGrp) {
-        strandGrp.style.opacity       = '0.45';
-        strandGrp.style.pointerEvents  = 'none';
-    }
 
     document.querySelectorAll('.field-error').forEach(function (el) {
         el.textContent = ''; el.style.display = 'none';
@@ -627,16 +754,8 @@ function submitStudent() {
     fd.append('password',   document.getElementById('f-password').value);
 
     var lrnEl    = document.getElementById('f-lrn');
-    var dobEl    = document.getElementById('f-dob');
-    var gradeEl  = document.getElementById('f-grade');
-    var strandEl = document.getElementById('f-strand');
-    var syearEl  = document.getElementById('f-syear');
 
     if (lrnEl)    fd.append('lrn',                       lrnEl.value.trim());
-    if (dobEl)    fd.append('date_of_birth',             dobEl.value);
-    if (gradeEl)  fd.append('grade_level',               gradeEl.value);
-    if (strandEl) fd.append('strand',                    strandEl.value);
-    if (syearEl)  fd.append('school_year_last_attended', syearEl.value.trim());
 
     var photoFile = document.getElementById('f-photo');
     if (photoFile && photoFile.files[0]) fd.append('profile_photo', photoFile.files[0]);
@@ -687,15 +806,11 @@ function openDocsModal(row) {
 
 function renderDocsModal(body, studentName, counts) {
     var docTypes = [
-        { key: 'certificate_of_registration',          label: 'Cert. of Registration',    icon: '📝' },
         { key: 'certificate_of_enrollment',            label: 'Cert. of Enrollment',      icon: '📝' },
         { key: 'certificate_of_grades',                label: 'Cert. of Grades',          icon: '📊' },
         { key: 'certificate_of_good_moral',            label: 'Good Moral',               icon: '🏅' },
         { key: 'certificate_of_transfer',              label: 'Cert. of Transfer',        icon: '🔁' },
         { key: 'certificate_of_completion_graduation', label: 'Completion / Graduation',  icon: '🎓' },
-        { key: 'sf10_form_137',                        label: 'SF10 / Form 137',         icon: '📋' },
-        { key: 'diploma',                              label: 'Diploma',                  icon: '🎓' },
-        { key: 'yearbook',                             label: 'Yearbook',                 icon: '📒' },
         { key: 'other',                                label: 'Other',                    icon: '📁' }
     ];
 
@@ -800,11 +915,10 @@ function openCsvPreviewModal(rows, headers) {
         });
     }
 
-    var display = ['first_name','last_name','role','email','contact','lrn','grade_level','strand','school_year_last_attended'];
+    var display = ['first_name','last_name','role','email','contact','lrn'];
     var labels  = {
         first_name:'First Name', last_name:'Last Name', role:'Role', email:'Email',
-        contact:'Contact', lrn:'LRN', grade_level:'Grade', strand:'Strand',
-        school_year_last_attended:'School Year'
+        contact:'Contact', lrn:'LRN'
     };
     var cols = display.filter(function (d) { return headers.indexOf(d) !== -1; });
 
@@ -859,10 +973,6 @@ function executeCsvImport(rows, btn) {
         fd.append('email',      r.email                            || '');
         fd.append('contact',    r.contact                          || '');
         fd.append('lrn',        r.lrn                              || '');
-        fd.append('date_of_birth', r.date_of_birth                 || '');
-        fd.append('grade_level',   r.grade_level                   || '');
-        fd.append('strand',        r.strand                        || '');
-        fd.append('school_year_last_attended', r.school_year_last_attended || '');
 
         var pw = r.password || '';
         if (!pw && r.lrn && r.lrn.length >= 5) {
@@ -982,7 +1092,7 @@ document.addEventListener('DOMContentLoaded', function () {
         if (e.target === docsOverlay) closeDocsModal();
     });
 
-    // Settings
+    // Settings (branding only — hours/contacts moved to the Information view)
     var colorInput = document.getElementById('theme-color');
     document.querySelectorAll('.swatch').forEach(function (sw) {
         sw.addEventListener('click', function () {
@@ -1003,6 +1113,16 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     });
     document.getElementById('btn-save-settings').addEventListener('click', saveSettings);
+
+    // Information view — office hours & contact info
+    document.getElementById('btn-save-info').addEventListener('click', saveInfo);
+
+    // Information view — requestable documents (add / remove / restore / delete)
+    loadDocTypes();
+    document.getElementById('btn-add-doc-type').addEventListener('click', addDocType);
+    document.getElementById('doc-type-name').addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') { e.preventDefault(); addDocType(); }
+    });
 
     // Own account
     document.getElementById('photo-input').addEventListener('change', function () {

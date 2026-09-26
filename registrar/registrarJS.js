@@ -145,14 +145,46 @@ document.addEventListener('DOMContentLoaded', function () {
     });
 });
 
-/* ── Tab switcher ── */
+/* ── View switcher: dashboard / main / archived / account ── */
 function switchView(view) {
-    var isMain = view === 'main';
+    var isDash  = view === 'dashboard';
+    var isAcc   = view === 'account';
+    var isMain  = view === 'main';
+
+    // Sections
+    document.getElementById('view-dashboard').style.display = isDash ? '' : 'none';
+    document.getElementById('view-requests').style.display  = (isDash || isAcc) ? 'none' : '';
+    document.getElementById('view-account').style.display   = isAcc ? '' : 'none';
+    document.getElementById('view-main').style.display      = (!isDash && !isAcc && isMain) ? '' : 'none';
+    document.getElementById('view-archived').style.display  = (!isDash && !isAcc && !isMain) ? '' : 'none';
+
+    // The shared "Registrar Dashboard" page banner sits outside the views.
+    // The account view carries its own "Account Information" heading —
+    // hide the dashboard banner there so the two don't stack.
+    var sharedTitle = document.getElementById('shared-title');
+    if (sharedTitle) sharedTitle.style.display = isAcc ? 'none' : '';
+
+    // Tabs (only meaningful inside the requests section)
     document.getElementById('tab-main').classList.toggle('active', isMain);
-    document.getElementById('tab-archived').classList.toggle('active', !isMain);
-    document.getElementById('view-main').style.display     = isMain ? '' : 'none';
-    document.getElementById('view-archived').style.display = isMain ? 'none' : '';
+    document.getElementById('tab-archived').classList.toggle('active', !isDash && !isAcc && !isMain);
+
+    // Sidebar highlight
+    var dashNav = document.getElementById('nav-dash');
+    var reqNav  = document.getElementById('nav-req');
+    var accNav  = document.getElementById('nav-acc');
+    if (dashNav) dashNav.classList.toggle('active', isDash);
+    if (reqNav)  reqNav.classList.toggle('active', !isDash && !isAcc);
+    if (accNav)  accNav.classList.toggle('active', isAcc);
+
+    if (!isDash) window.scrollTo({ top: 0, behavior: 'smooth' });
+    history.replaceState({}, '', '?view=' + view);
 }
+
+/* ── Restore the view from the URL (e.g. ?view=account after a save) ── */
+(function () {
+    var v = new URLSearchParams(window.location.search).get('view');
+    if (v === 'account' || v === 'main' || v === 'archived') switchView(v);
+})();
 
 /* ═══════════════════════════════════════════════════
    TABLE FILTERING (search text + status chip combined)
@@ -228,10 +260,8 @@ function filterTable(tbodyId, q) {
 
 /* Metadata for each requirement slot */
 var DOC_META = {
-    idPhoto:    { icon: '🪪', title: 'Valid ID',             tag: 'Required', cls: 'tag-req' },
-    authLetter: { icon: '✉️', title: 'Authorization Letter', tag: 'Optional', cls: 'tag-opt' },
-    receipt:    { icon: '🧾', title: 'Payment Receipt',      tag: 'Payment',  cls: 'tag-opt' },
-    eCert:      { icon: '🎓', title: 'E-Certificate',        tag: 'Released', cls: 'tag-cert' }
+    idPhoto:    { icon: '🪪', title: 'Valid ID',             tag: 'Required', cls: 'tag-req', field: 'id_photo' },
+    eCert:      { icon: '🎓', title: 'E-Certificate',        tag: 'Released', cls: 'tag-cert', field: 'e_certificate' }
 };
 
 function openRequestModal(btn) {
@@ -283,15 +313,13 @@ function renderDocs(d) {
 
     var slots = [
         ['idPhoto',    'id-photo'],
-        ['authLetter', 'auth-letter'],
-        ['receipt',    'receipt'],
         ['eCert',      'e-cert']
     ];
 
     var shown = 0;
     slots.forEach(function (pair) {
         if (!d[pair[0]]) return;
-        grid.appendChild(buildDocCard(DOC_META[pair[0]], d[pair[0]]));
+        grid.appendChild(buildDocCard(DOC_META[pair[0]], d[pair[0]], d.reqId));
         shown++;
     });
 
@@ -300,23 +328,15 @@ function renderDocs(d) {
     }
 }
 
-/* Normalize path — strip Windows absolute prefixes, keep uploads/... onward.
-   DB paths are web-root-relative; this page sits in /registrar/, so prefix ../ */
-function normalizeUploadPath(filePath) {
-    var clean = String(filePath).replace(/\\/g, '/');
-    var idx = clean.indexOf('uploads/');
-    if (idx !== -1) clean = clean.substring(idx);
-    return '../' + clean;
-}
 
-function fileExt(p) {
-    return p.split('.').pop().toLowerCase();
-}
-
-function buildDocCard(meta, filePath) {
-    var url  = normalizeUploadPath(filePath);
-    var ext  = fileExt(url);
-    var name = url.substring(url.lastIndexOf('/') + 1);
+function buildDocCard(meta, filePath, reqId) {
+    /* Files in request_requirements/ and e_certificates/ are blocked from
+       direct /uploads/ access — stream them through the authenticated
+       registrar/admin endpoint instead. */
+    var url  = '../phpLogics/downloadReqFile.php?req_id=' + encodeURIComponent(reqId) +
+               '&field=' + encodeURIComponent(meta.field);
+    var name = filePath.split('/').pop();
+    var ext  = name.split('.').pop().toLowerCase();
     var isImg = ['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext);
     var isPdf = ext === 'pdf';
 
@@ -475,8 +495,6 @@ function renderStudentInfo(s) {
     var fields = [
         ['Student ID',        s.student_id],
         ['LRN',               s.lrn],
-        ['Grade Level',       s.grade_level],
-        ['Strand / Track',    s.strand],
         ['Email',             s.email],
         ['Contact Number',    s.contact]
     ];
@@ -586,3 +604,117 @@ function escapeAttr(s) {
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#39;');
 }
+
+/* ══════════ Reject Reason Modal ══════════ */
+function openRejectModal(reqId) {
+    document.getElementById('reject-req-id').value = reqId;
+    document.getElementById('reject-modal').classList.add('open');
+    document.getElementById('reject-reason-input').value = '';
+    setTimeout(function () { document.getElementById('reject-reason-input').focus(); }, 60);
+}
+
+function closeRejectModal() {
+    document.getElementById('reject-modal').classList.remove('open');
+}
+
+/* Close on backdrop click or Escape */
+document.addEventListener('click', function (e) {
+    var modal = document.getElementById('reject-modal');
+    if (modal && e.target === modal) closeRejectModal();
+});
+document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') closeRejectModal();
+});
+
+/* ═════════════════════════════════════════
+   ACCOUNT INFORMATION (in-page view)
+   ═════════════════════════════════════════ */
+
+/* ── Toast feedback ── */
+var toastTimer = null;
+function showToast(msg, type) {
+    var t = document.getElementById('toast');
+    if (!t) return;
+    t.textContent = msg;
+    t.className = 'toast ' + (type || 'success') + ' show';
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { t.classList.remove('show'); }, 4000);
+}
+
+/* ── Own-profile photo preview ── */
+var accountPhotoFile = null;
+
+document.addEventListener('DOMContentLoaded', function () {
+    var photoInp = document.getElementById('photo-input');
+    if (photoInp) {
+        photoInp.addEventListener('change', function () {
+            accountPhotoFile = this.files && this.files[0] ? this.files[0] : null;
+            var nameEl = document.getElementById('photo-name');
+            if (nameEl) nameEl.textContent = accountPhotoFile ? accountPhotoFile.name : '';
+            if (accountPhotoFile) {
+                var reader = new FileReader();
+                reader.onload = function (e) {
+                    var av = document.getElementById('avatar-display');
+                    if (av) av.innerHTML = '<img src="' + e.target.result + '" alt="avatar">';
+                };
+                reader.readAsDataURL(accountPhotoFile);
+            }
+        });
+    }
+
+    /* ── Save own profile (first/last/email/contact/password/photo) ── */
+    var saveBtn = document.getElementById('btn-save-account');
+    if (saveBtn) {
+        saveBtn.addEventListener('click', function () {
+            var first    = document.getElementById('acc-first').value.trim();
+            var last     = document.getElementById('acc-last').value.trim();
+            var email    = document.getElementById('acc-email').value.trim();
+            var contact  = document.getElementById('acc-contact').value.trim();
+            var password = document.getElementById('acc-password').value;
+            var currentPwEl = document.getElementById('acc-current-password');
+            var currentPw   = currentPwEl ? currentPwEl.value : '';
+
+            if (!first || !last) { showToast('First and last name are required.', 'error'); return; }
+            if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { showToast('Please enter a valid email.', 'error'); return; }
+            // A password change must be authorized by the CURRENT password
+            if (password && !currentPw) {
+                showToast('Please enter your current password to set a new one.', 'error');
+                return;
+            }
+
+            saveBtn.disabled = true;
+
+            var fd = new FormData();
+            fd.append('first_name', first);
+            fd.append('last_name', last);
+            fd.append('email', email);
+            fd.append('contact', contact);
+            if (password) {
+                fd.append('password', password);
+                fd.append('current_password', currentPw);
+            }
+            if (accountPhotoFile) fd.append('profile_photo', accountPhotoFile);
+            fd.append('csrf_token', CSRF_TOKEN);
+
+            fetch('../phpLogics/updateOwnAccount.php', { method: 'POST', body: fd })
+                .then(function (r) { return r.json(); })
+                .then(function (data) {
+                    saveBtn.disabled = false;
+                    if (data.success) {
+                        showToast('Account updated successfully!', 'success');
+                        // Reload back into the Account view so the header/
+                        // sidebar show the new name right away
+                        setTimeout(function () {
+                            window.location.href = 'registrarMainPage.php?view=account';
+                        }, 800);
+                    } else {
+                        showToast(data.message || 'Failed to update account.', 'error');
+                    }
+                })
+                .catch(function () {
+                    saveBtn.disabled = false;
+                    showToast('Network error. Please try again.', 'error');
+                });
+        });
+    }
+});

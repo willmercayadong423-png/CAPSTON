@@ -10,7 +10,7 @@ if (strtolower($_SESSION['role']) !== 'student') {
 $student_id = $_SESSION['user_id'];
 $field   = $_GET['field']  ?? '';
 $req_id  = (int)($_GET['req_id'] ?? 0);
-$allowed = ['id_photo', 'auth_letter'];
+$allowed = ['id_photo'];
 
 if (!in_array($field, $allowed, true)) {
     http_response_code(400);
@@ -22,11 +22,17 @@ $stmt->bind_param("ii", $req_id, $student_id);
 $stmt->execute();
 $row = $stmt->get_result()->fetch_assoc();
 
-$path = __DIR__ . '/../' . $row['filepath'];
-
-if (!$row || empty($row['filepath']) || !file_exists($path)) {
+// Check the row BEFORE touching it (fetch_assoc returns null when no row)
+if (!$row || empty($row['filepath'])) {
     http_response_code(404);
     exit('Not found');
+}
+
+$path = __DIR__ . '/../' . $row['filepath'];
+
+if (!file_exists($path)) {
+    http_response_code(404);
+    exit('File not found');
 }
 
 $mime = mime_content_type($path);

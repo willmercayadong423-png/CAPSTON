@@ -1,9 +1,10 @@
 <?php
 require '../phpLogics/auth.php';
 include '../database/db.php';
+require_once __DIR__ . '/audit.php';
 header('Content-Type: application/json');
 
-// ── Registrar only ────────────────────────────────────────────────
+// ── Admin only ────────────────────────────────────────────────
 if (strtolower($_SESSION['role'] ?? '') !== 'admin') {
     http_response_code(403);
     echo json_encode(["success" => false, "message" => "Forbidden"]);
@@ -39,6 +40,9 @@ if (!$stmt->execute()) {
     echo json_encode(["success" => false, "message" => "Database error."]);
     exit;
 }
+
+// ── Audit: admin restored an archived account ──
+audit_log($conn, 'USER_UNARCHIVED', 'user', $id, "Account '{$id}' restored to active");
 
 echo json_encode(["success" => true]);
 exit;

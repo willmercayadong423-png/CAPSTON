@@ -2,7 +2,7 @@
 require("auth.php");
 header('Content-Type: application/json');
 
-// ── Registrar only ────────────────────────────────────────────────
+// ── Admin only ────────────────────────────────────────────────
 if (strtolower($_SESSION['role'] ?? '') !== 'admin') {
     http_response_code(403);
     echo json_encode(['success' => false, 'message' => 'Forbidden']);
@@ -17,6 +17,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !verifyCsrfToken()) {
 }
 
 require_once __DIR__ . '/../database/config.php';
+require_once __DIR__ . '/audit.php';
 
 $student_id = trim($_POST['student_id'] ?? '');
 $first      = trim($_POST['first_name'] ?? '');
@@ -27,10 +28,6 @@ $contact    = trim($_POST['contact']    ?? '');
 $password   = $_POST['password']        ?? '';
 
 $lrn    = trim($_POST['lrn']                       ?? '');
-$dob    = trim($_POST['date_of_birth']             ?? '');
-$grade  = trim($_POST['grade_level']               ?? '');
-$strand = trim($_POST['strand']                    ?? '');
-$syear  = trim($_POST['school_year_last_attended'] ?? '');
 
 $allowedRoles = ['Student', 'Registrar', 'Admin'];
 
@@ -50,6 +47,20 @@ if (!$email) {
     echo json_encode(['success' => false, 'message' => 'Invalid email address']);
     exit;
 }
+// Server-side enforcement of the same rules the admin form checks client-side
+// (client validation is bypassable — the API must be the last line of defense).
+if ($password !== '' && strlen($password) < 5) {
+    echo json_encode(['success' => false, 'message' => 'Password must be at least 5 characters.']);
+    exit;
+}
+if (!preg_match('/^[0-9]{7,11}$/', $contact)) {
+    echo json_encode(['success' => false, 'message' => 'Contact number must be 7–11 digits, numbers only.']);
+    exit;
+}
+if ($lrn !== '' && !preg_match('/^[0-9]{1,12}$/', $lrn)) {
+    echo json_encode(['success' => false, 'message' => 'LRN must be up to 12 digits, numbers only.']);
+    exit;
+}
 
 try {
     $pdo = new PDO(
@@ -67,6 +78,11 @@ try {
         exit;
     }
 
+    // ── Remember the OLD role — the audit must show role changes explicitly ──
+    $old = $pdo->prepare("SELECT role FROM users WHERE student_id = ?");
+    $old->execute([$student_id]);
+    $oldRole = (string)($old->fetchColumn() ?: '');
+
     // ── Fetch existing photo ───────────────────────────────────────
     $stmt = $pdo->prepare("SELECT profile_photo FROM users WHERE student_id = ?");
     $stmt->execute([$student_id]);
@@ -82,21 +98,22 @@ try {
 
     // ── Handle profile photo upload ────────────────────────────────
     if (isset($_FILES['profile_photo']) && $_FILES['profile_photo']['error'] === UPLOAD_ERR_OK) {
-        $allowed = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
-        $mime    = mime_content_type($_FILES['profile_photo']['tmp_name']);
-        $size    = $_FILES['profile_photo']['size'];
+        $allowed     = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+        $allowed_ext = ['jpg', 'jpeg', 'png', 'gif', 'webp'];
+        $mime        = mime_content_type($_FILES['profile_photo']['tmp_name']);
+        $size        = $_FILES['profile_photo']['size'];
+        $ext         = strtolower(pathinfo($_FILES['profile_photo']['name'], PATHINFO_EXTENSION));
 
-        if (in_array($mime, $allowed) && $size <= 3 * 1024 * 1024) {
+        if (in_array($mime, $allowed) && in_array($ext, $allowed_ext, true) && $size <= 3 * 1024 * 1024) {
             $dir = __DIR__ . '/../uploads/profile_photos/';
             if (!is_dir($dir)) mkdir($dir, 0755, true);
 
             // Delete old photo
             if (!empty($existing_photo)) {
-                $old = __DIR__ . '/../' . $existing_photo;
-                if (file_exists($old)) unlink($old);
+                $oldPhotoFs = __DIR__ . '/../' . $existing_photo;
+                if (file_exists($oldPhotoFs)) unlink($oldPhotoFs);
             }
 
-            $ext      = strtolower(pathinfo($_FILES['profile_photo']['name'], PATHINFO_EXTENSION));
             $filename = 'student_' . $student_id . '_' . time() . '.' . $ext;
 
             if (move_uploaded_file($_FILES['profile_photo']['tmp_name'], $dir . $filename)) {
@@ -118,10 +135,6 @@ try {
                 email         = ?,
                 contact       = ?,
                 lrn           = ?,
-                date_of_birth = ?,
-                grade_level   = ?,
-                strand        = ?,
-                school_year_last_attended = ?,
                 password      = ?
             WHERE student_id = ?
         ");
@@ -133,10 +146,6 @@ try {
             $email,
             $contact,
             $lrn,
-            $dob    ?: null,
-            $grade,
-            $strand,
-            $syear,
             $hash,
             $student_id
         ]);
@@ -150,11 +159,7 @@ try {
                 role          = ?,
                 email         = ?,
                 contact       = ?,
-                lrn           = ?,
-                date_of_birth = ?,
-                grade_level   = ?,
-                strand        = ?,
-                school_year_last_attended = ?
+                lrn           = ?
             WHERE student_id = ?
         ");
         $stmt->execute([
@@ -165,13 +170,15 @@ try {
             $email,
             $contact,
             $lrn,
-            $dob    ?: null,
-            $grade,
-            $strand,
-            $syear,
             $student_id
         ]);
     }
+
+    // ── Audit: admin updated an account record ──
+    audit_log($pdo, 'USER_UPDATED', 'user', $student_id,
+        "Account '{$student_id}' updated"
+        . (($oldRole !== '' && $oldRole !== $role) ? " — role: {$oldRole} → {$role}" : '')
+        . ($password !== '' ? ' (password reset)' : ''));
 
     echo json_encode(['success' => true]);
 

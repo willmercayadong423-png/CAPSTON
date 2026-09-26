@@ -11,6 +11,7 @@ require __DIR__ . "/../phpLogics/auth.php";
 include(__DIR__ . "/../database/db.php");
 include __DIR__ . "/../phpLogics/site_config.php";
 require_once __DIR__ . "/../phpLogics/mailer.php";
+require_once __DIR__ . "/../phpLogics/audit.php";
 
 
 header("X-Content-Type-Options: nosniff");
@@ -41,15 +42,14 @@ function verifyCsrf(): bool
 }
 
 // ── Shared list of requestable document types ────────────────────
-// Single source of truth (phpLogics/document_types.php) — the same list
-// validates edits in editReq.php, so the two sides can never drift.
-$documentTypes = require __DIR__ . '/../phpLogics/document_types.php';
-
-$inPersonOnlyTypes = [
-    'SF10/Form 137',
-    'Diploma',
-    'YearBook',
-];
+// Single source of truth (phpLogics/document_types.php → DB table) — the
+// same list validates edits in editReq.php, and the Admin manages it in
+// Information → Requestable Documents.
+require_once __DIR__ . '/../phpLogics/document_types.php';
+$documentTypes = get_document_types($conn);            // active only
+$docGlMap      = get_document_type_map($conn, false);  // ALL types (the edit
+                                                        // modal may hold a
+                                                        // removed current type)
 
 
 // ── Fetch student info ─────────────────────────────────────────────
@@ -85,6 +85,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_account'])) {
         if ($chk->num_rows > 0) {
             $updateError = "That email is already used by another account.";
         } else {
+            // ── Optional password change ──
+            // (The confirm-password step was removed from the form — the
+            // current password alone authorizes the change.)
+            $curPass  = (string)($_POST['current_password'] ?? '');
+            $newPass  = (string)($_POST['new_password'] ?? '');
+            $changePw = ($newPass !== '' || $curPass !== '');
+
+            if ($changePw && !password_verify($curPass, $student['password'] ?? '')) {
+                $updateError = "Current password is incorrect.";
+            } elseif ($changePw && $newPass === '') {
+                // current password typed but new left empty
+                $updateError = "Please enter your new password.";
+            } elseif ($changePw && strlen($newPass) < 5) {
+                $updateError = "New password must be at least 5 characters.";
+            }
+
             $new_photo = $student['profile_photo'] ?? null;
 
            
@@ -169,23 +185,67 @@ unset($target);
     $new_lrn        = trim($_POST['lrn'] ?? '');
     $new_first_name = trim($_POST['first_name'] ?? '');
     $new_last_name  = trim($_POST['last_name'] ?? '');
-    $new_grade      = trim($_POST['grade_level'] ?? '');
-    $new_strand     = trim($_POST['strand'] ?? '');
-    $new_sy         = trim($_POST['school_year_last_attended'] ?? '');
-    $new_dob        = trim($_POST['date_of_birth'] ?? '');
 
+    /* ── "Name" card support ─────────────────────────────────────
+     * The combined Name card (student_name) mirrors First/Last via JS.
+     * If the student edited ONLY the combined card (e.g. JS disabled),
+     * derive First/Last from it: first word = first name, rest = last. */
+    $origFirst  = trim((string)$student['first_name']);
+    $origLast   = trim((string)$student['last_name']);
+    $origFull   = trim($origFirst . ' ' . $origLast);
+    $fullInput  = trim((string)($_POST['student_name'] ?? ''));
+
+    $editedCombined = ($fullInput !== '' && $fullInput !== $origFull);
+    $editedSplit    = ($new_first_name !== $origFirst || $new_last_name !== $origLast);
+
+    if ($editedCombined && !$editedSplit && $fullInput !== '') {
+        $parts = preg_split('/\s+/', $fullInput);
+        $new_first_name = (string)array_shift($parts);
+        $new_last_name  = implode(' ', $parts);
+    }
+    // Missing values (blanked/tampered fields) → fall back to the full name
+    // (the first word always belongs to First Name; only the rest can fill Last)
+    if (($new_first_name === '' || $new_last_name === '') && $fullInput !== '') {
+        $parts     = preg_split('/\s+/', $fullInput);
+        $firstWord = (string)array_shift($parts);
+        if ($new_first_name === '') $new_first_name = $firstWord;
+        if ($new_last_name === '')  $new_last_name  = implode(' ', $parts);
+    }
+
+    /* ── Validate (HTML "required" is bypassable — enforce server-side) ── */
+    if ($new_first_name === '' || $new_last_name === '') {
+        $updateError = "First and last name are required.";
+    } elseif (mb_strlen($new_first_name) > 100 || mb_strlen($new_last_name) > 100) {
+        $updateError = "First and last name must be 100 characters or fewer.";
+    } elseif ($new_lrn !== '' && !preg_match('/^[0-9]{1,12}$/', $new_lrn)) {
+        $updateError = "LRN must be up to 12 digits, numbers only.";
+    }
+}
+
+if (empty($updateError)) {
     $upd = $conn->prepare("UPDATE users
         SET email=?, contact=?, profile_photo=?, id_front=?, id_back=?,
-            lrn=?, first_name=?, last_name=?, grade_level=?, strand=?,
-            school_year_last_attended=?, date_of_birth=?
+            lrn=?, first_name=?, last_name=?
         WHERE id=?");
    $upd->bind_param(
-    "ssssssssssssi",
+    "ssssssssi",
     $new_email, $new_contact, $new_photo, $new_id_front, $new_id_back,
-    $new_lrn, $new_first_name, $new_last_name, $new_grade, $new_strand,
-    $new_sy, $new_dob, $student_id
+    $new_lrn, $new_first_name, $new_last_name,
+    $student_id
 );
                 if ($upd->execute()) {
+                    // ── Apply the optional password change ──
+                    if ($changePw && $newPass !== '') {
+                        $hash = password_hash($newPass, PASSWORD_DEFAULT);
+                        $pw = $conn->prepare("UPDATE users SET password = ? WHERE id = ?");
+                        $pw->bind_param("si", $hash, $student_id);
+                        $pw->execute();
+                        $pw->close();
+                    }
+
+                    audit_log($conn, 'PROFILE_UPDATED', 'user', (string)$student_id,
+                        'Own profile updated' . (($changePw && $newPass !== '') ? ' (password changed)' : ''));
+
                     $updateSuccess = "Account information updated successfully.";
                     $s2 = $conn->prepare("SELECT * FROM users WHERE id = ?");
                     $s2->bind_param("i", $student_id);
@@ -214,6 +274,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['cancel_request']) && 
     );
     $cancel->bind_param("ii", $req_id, $student_id);
     $cancel->execute();
+    if ($cancel->affected_rows > 0) {
+        audit_log($conn, 'REQUEST_CANCELLED', 'document_request',
+            'REQ-' . str_pad((string)$req_id, 4, '0', STR_PAD_LEFT),
+            "Request cancelled by student");
+    }
     $cancel->close();
     header("Location: dashboard.php?view=requests&tab=archived");
     exit();
@@ -228,6 +293,12 @@ $errorMsg   = "";
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_request'])) {
     $doc_type = trim($_POST['document_type']);
     $purpose  = trim($_POST['purpose']);
+    $syInput  = trim($_POST['school_year_last_attended'] ?? '');
+    $glInput  = trim($_POST['grade_level'] ?? '');
+
+    // Which documents also require the Grade Level now comes from the DB
+    // (document_types.requires_grade_level — admin-managed per document).
+    $glRequired = (int)($docGlMap[$doc_type] ?? 0) === 1;
 
     if (!verifyCsrf()) {
         $errorMsg = "Your session expired. Please try again.";
@@ -235,6 +306,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_request'])) {
         $errorMsg = "Please fill in all required fields.";
     } elseif (!in_array($doc_type, $documentTypes, true)) {
         $errorMsg = "Please select a valid document type.";
+    } elseif ($syInput === '') {
+        $errorMsg = "Please enter the School Year you last attended (e.g. 2024-2025).";
+    } elseif ($glRequired && $glInput === '') {
+        $errorMsg = "Please enter your Grade Level.";
     } else {
 
         // ── Limit: max 3 pending requests at once ──
@@ -270,7 +345,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_request'])) {
         if (!is_dir($req_fs_dir)) mkdir($req_fs_dir, 0755, true);
 
         $upload_errors = [];
-        $saved_files   = ['id_photo' => null, 'auth_letter' => null];
+        $saved_files   = ['id_photo' => null];
 
       $allowed_ext = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'pdf'];
 
@@ -293,55 +368,45 @@ if (!in_array($id_ext, $allowed_ext, true)) {
     }
 }
 
-  if (isset($_FILES['auth_letter']) && $_FILES['auth_letter']['error'] === UPLOAD_ERR_OK) {
-    $al_file = $_FILES['auth_letter'];
-    $al_type = mime_content_type($al_file['tmp_name']);
-    $al_ext  = strtolower(pathinfo($al_file['name'], PATHINFO_EXTENSION));
-
-    if (!in_array($al_ext, $allowed_ext, true)) {
-        $upload_errors[] = "Authorization Letter: file extension not allowed.";
-    } elseif (!in_array($al_type, $allowed_types)) {
-        $upload_errors[] = "Authorization Letter: invalid file type.";
-    } elseif ($al_file['size'] > $max_size) {
-        $upload_errors[] = "Authorization Letter: file exceeds 5 MB limit.";
-    } else {
-        $filename = 'auth_letter_' . $student_id . '_' . time() . '_' . rand(100, 999) . '.' . $al_ext;
-        if (move_uploaded_file($al_file['tmp_name'], $req_fs_dir . $filename)) {
-            $saved_files['auth_letter'] = $req_web_dir . $filename;
-        } else {
-            $upload_errors[] = "Authorization Letter: failed to save. Please try again.";
-        }
-    }
-}
-
         // ── Payment removed from the student flow ──
-        // Payment is now settled in person at the Registrar's Office during
-        // pickup. The columns stay NULL/Unpaid; the registrar side can still
-        // see and manage payment status for records created before this change.
-        $payment_method = null;
-        $saved_files['receipt'] = null;
+        // Payment is settled in person at the Registrar's Office during pickup.
 
         if (!empty($upload_errors)) {
             $errorMsg = implode(' ', $upload_errors);
         } else {
             $ins = $conn->prepare(
                 "INSERT INTO document_requests
-                    (user_id, document_type, purpose, id_photo, auth_letter, payment_method, receipt, payment_status)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, 'Unpaid')"
+                    (user_id, document_type, purpose, grade_level, school_year_last_attended, id_photo)
+                 VALUES (?, ?, ?, ?, ?, ?)"
             );
+            $glValue = ($glInput !== '') ? $glInput : null;      // bind_param needs variables
+            $syValue = ($syInput !== '') ? $syInput : null;
             $ins->bind_param(
-                "issssss",
+                "isssss",
                 $student_id,
                 $doc_type,
                 $purpose,
-                $saved_files['id_photo'],
-                $saved_files['auth_letter'],
-                $payment_method,
-                $saved_files['receipt']
+                $glValue,
+                $syValue,
+                $saved_files['id_photo']
             );
                if ($ins->execute()) {
                 // ── Tell the registrar accounts a new request is waiting ──
                 $newReqNo = 'REQ-' . str_pad((string) $conn->insert_id, 4, '0', STR_PAD_LEFT);
+                audit_log($conn, 'REQUEST_SUBMITTED', 'document_request', $newReqNo,
+                    "{$doc_type} — Purpose: {$purpose}");
+
+                // ── Email the student a confirmation that the request was received ──
+                $conf = send_status_email(
+                    $student['email'],
+                    trim($student['first_name'] . ' ' . $student['last_name']),
+                    $newReqNo,
+                    $doc_type,
+                    'Pending'
+                );
+                if (!$conf['ok']) {
+                    error_log("Submission confirmation mail failed ({$newReqNo}): " . $conf['error']);
+                }
                 try {
                     $regs = $conn->query(
                         "SELECT email, first_name, last_name FROM users
@@ -383,11 +448,18 @@ $annStmt = $conn->query(
 $announcements = $annStmt ? $annStmt->fetch_all(MYSQLI_ASSOC) : [];
 
 // ── Surface endpoint error redirects (edit/restore failures) as alerts ──
+if (empty($errorMsg) && isset($_GET['upload_error'])) {
+    $errorMsg = (string)$_GET['upload_error'];   // detailed message from editReq.php (escaped at output below)
+}
 if (empty($errorMsg) && isset($_GET['error'])) {
     $errorMsg = match ($_GET['error']) {
         'csrf_fail'        => 'Your session expired. Please try again.',
         'missing_fields'   => 'Please fill in all required fields.',
         'invalid_doc_type' => 'Please select a valid document type.',
+        'sy_required'      => 'Please enter the School Year you last attended (e.g. 2024-2025).',
+        'gl_required'      => 'Please enter your Grade Level.',
+        'dup_pending'      => 'You already have a pending request for that document type. Please wait for it to be processed.',
+        'pending_limit'    => 'Restoring would exceed the 3-pending-request limit. Please wait for one to be processed.',
         'not_found'        => 'That request can no longer be edited — it may have already been processed.',
         'db_fail'          => 'Something went wrong. Please try again.',
         default            => 'An error occurred. Please try again.',
@@ -462,6 +534,7 @@ $avatarInitials = strtoupper(substr($student['first_name'], 0, 1) . substr($stud
         document.documentElement.removeAttribute('data-theme');
     </script>
     <link rel="stylesheet" href="dashb.css">
+    <link rel="stylesheet" href="../assets/css/scroll-table.css">
     <?php echo theme_head(); // admin-managed brand color ?>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -625,11 +698,21 @@ $avatarInitials = strtoupper(substr($student['first_name'], 0, 1) . substr($stud
     <h2 class="card-title">You can request school documents, monitor your request status, and stay updated with school announcements.</h2>
     <Br>
     <div class="cards">
-        <div class="card"><span class="card-icon">📋</span><h4>Total Requests</h4><h2><?php echo $cntTotal; ?></h2></div>
-        <div class="card"><span class="card-icon">⏳</span><h4>Pending</h4><h2><?php echo $cntPending; ?></h2></div>
-        <div class="card"><span class="card-icon">⚙️</span><h4>Processing</h4><h2><?php echo $cntProcessing; ?></h2></div>
-        <div class="card"><span class="card-icon">✅</span><h4>Released</h4><h2><?php echo $cntReleased; ?></h2></div>
-        <div class="card"><span class="card-icon">❌</span><h4>Cancelled</h4><h2><?php echo $cntCancelled; ?></h2></div>
+        <div class="card card-click" data-goto="" data-view="main" title="Show all of my requests">
+            <span class="card-icon">📋</span><h4>Total Requests</h4><h2><?php echo $cntTotal; ?></h2>
+        </div>
+        <div class="card card-click" data-goto="Pending" data-view="main" title="Show my pending requests">
+            <span class="card-icon">⏳</span><h4>Pending</h4><h2><?php echo $cntPending; ?></h2>
+        </div>
+        <div class="card card-click" data-goto="Processing" data-view="main" title="Show my processing requests">
+            <span class="card-icon">⚙️</span><h4>Processing</h4><h2><?php echo $cntProcessing; ?></h2>
+        </div>
+        <div class="card card-click" data-goto="Released" data-view="archived" title="Show my released requests">
+            <span class="card-icon">✅</span><h4>Released</h4><h2><?php echo $cntReleased; ?></h2>
+        </div>
+        <div class="card card-click" data-goto="Cancelled" data-view="archived" title="Show my cancelled requests">
+            <span class="card-icon">❌</span><h4>Cancelled</h4><h2><?php echo $cntCancelled; ?></h2>
+        </div>
     </div>
 
     <div class="dashboard-grid">
@@ -651,16 +734,16 @@ $avatarInitials = strtoupper(substr($student['first_name'], 0, 1) . substr($stud
 
         <div class="dashboard-card">
             <h3>🕒 Office Hours</h3>
-            <p><?php echo site_setting('office_hours', 'Monday to Friday, 8:00 AM – 4:00 PM'); ?></p>
+            <p><?php echo htmlspecialchars(site_setting('office_hours', 'Monday to Friday, 8:00 AM – 4:00 PM')); ?></p>
             <p style="margin-top:10px;">Closed during weekends and holidays.</p>
         </div>
 
         <div class="dashboard-card full-width">
             <h3>☎ Contact Information</h3>
             <p><strong>Registrar's Office</strong></p>
-            <p>Email: <?php echo site_setting('contact_email', 'registrar@hehms.edu.ph'); ?></p>
-            <p>Phone: <?php echo site_setting('contact_phone', '(044) 123-4567'); ?></p>
-            <p>Location: <?php echo site_setting('contact_location', 'Hilario E. Hermosa Memorial High School, Siclong, Laur, Nueva Ecija'); ?></p>
+            <p>Email: <?php echo htmlspecialchars(site_setting('contact_email', 'registrar@hehms.edu.ph')); ?></p>
+            <p>Phone: <?php echo htmlspecialchars(site_setting('contact_phone', '(044) 123-4567')); ?></p>
+            <p>Location: <?php echo htmlspecialchars(site_setting('contact_location', 'Hilario E. Hermosa Memorial High School, Siclong, Laur, Nueva Ecija')); ?></p>
         </div>
     </div>
 
@@ -719,7 +802,14 @@ $avatarInitials = strtoupper(substr($student['first_name'], 0, 1) . substr($stud
                             <button class="btn-new-request" onclick="showView('request')">✚ New Request</button>
                         </div>
                     </div>
-                    <table class="tbl-header-table">
+                    <!-- Status filter chips -->
+                    <div class="filter-chips" id="chips-main">
+                        <button type="button" class="chip active" data-filter="">All</button>
+                        <button type="button" class="chip" data-filter="Pending">⏳ Pending</button>
+                        <button type="button" class="chip" data-filter="Processing">⚙️ Processing</button>
+                    </div>
+                    <div class="tbl-scroll-wrap">
+                        <table class="tbl-x" style="min-width: 900px;">
                         <thead>
                             <tr>
                                 <th>Request ID</th>
@@ -730,9 +820,6 @@ $avatarInitials = strtoupper(substr($student['first_name'], 0, 1) . substr($stud
                                 <th>Action</th>
                             </tr>
                         </thead>
-                    </table>
-                    <div class="table-scroll-body">
-                        <table>
                             <tbody id="main-tbody">
                                 <?php if (empty($mainRequests)): ?>
                                     <tr>
@@ -745,13 +832,12 @@ $avatarInitials = strtoupper(substr($student['first_name'], 0, 1) . substr($stud
                                     </tr>
                                     <?php else: foreach ($mainRequests as $r):
                                         $cls     = badgeClass($r['status'], $r['cancelled_by'] ?? '');
-                                        $padId   = 'REQ-' . str_pad($r['id'], 3, '0', STR_PAD_LEFT);
+                                        $padId   = 'REQ-' . str_pad($r['id'], 4, '0', STR_PAD_LEFT);
                                         $dateReq = date('m/d/Y', strtotime($r['date_requested']));
                                         $canAct  = ($r['status'] === 'Pending');
                                         $existId = !empty($r['id_photo'])    ? $r['id_photo']    : '';
-                                        $existAl = !empty($r['auth_letter']) ? $r['auth_letter'] : '';
                                     ?>
-                                        <tr>
+                                        <tr data-status="<?php echo htmlspecialchars($r['status']); ?>">
                                             <td><strong><?php echo $padId; ?></strong></td>
                                             <td><?php echo $studentName; ?></td>
                                             <td><?php echo htmlspecialchars($r['document_type']); ?></td>
@@ -764,8 +850,9 @@ $avatarInitials = strtoupper(substr($student['first_name'], 0, 1) . substr($stud
     data-req-id="<?php echo (int)$r['id']; ?>"
     data-doc-type="<?php echo htmlspecialchars($r['document_type'], ENT_QUOTES); ?>"
     data-purpose="<?php echo htmlspecialchars($r['purpose'], ENT_QUOTES); ?>"
-    data-id-photo="<?php echo htmlspecialchars($existId, ENT_QUOTES); ?>"
-    data-auth-letter="<?php echo htmlspecialchars($existAl, ENT_QUOTES); ?>">
+    data-sy="<?php echo htmlspecialchars($r['school_year_last_attended'] ?? '', ENT_QUOTES); ?>"
+    data-gl="<?php echo htmlspecialchars($r['grade_level'] ?? '', ENT_QUOTES); ?>"
+    data-id-photo="<?php echo htmlspecialchars($existId, ENT_QUOTES); ?>">
     Edit
 </button>
                                                         <form method="POST" style="display:inline;"
@@ -799,7 +886,14 @@ $avatarInitials = strtoupper(substr($student['first_name'], 0, 1) . substr($stud
                                 oninput="filterRows('archived-tbody', this.value)">
                         </div>
                     </div>
-                    <table class="tbl-header-table">
+                    <!-- Status filter chips -->
+                    <div class="filter-chips" id="chips-archived">
+                        <button type="button" class="chip active" data-filter="">All</button>
+                        <button type="button" class="chip" data-filter="Released">✔ Released</button>
+                        <button type="button" class="chip" data-filter="Cancelled">✖ Cancelled</button>
+                    </div>
+                    <div class="tbl-scroll-wrap">
+                        <table class="tbl-x" style="min-width: 950px;">
                         <thead>
                             <tr>
                                 <th>Req ID</th>
@@ -810,9 +904,6 @@ $avatarInitials = strtoupper(substr($student['first_name'], 0, 1) . substr($stud
                                 <th>Actions</th>
                             </tr>
                         </thead>
-                    </table>
-                    <div class="table-scroll-body">
-                        <table>
                             <tbody id="archived-tbody">
                                 <?php if (empty($archivedRequests)): ?>
                                     <tr>
@@ -826,7 +917,7 @@ $avatarInitials = strtoupper(substr($student['first_name'], 0, 1) . substr($stud
                                     <?php else: foreach ($archivedRequests as $r):
                                         $cancelledBy = trim($r['cancelled_by'] ?? '');
                                         $cls         = badgeClass($r['status'], $cancelledBy);
-                                        $padId       = 'REQ-' . str_pad($r['id'], 3, '0', STR_PAD_LEFT);
+                                        $padId       = 'REQ-' . str_pad($r['id'], 4, '0', STR_PAD_LEFT);
                                         $dateReq     = date('m/d/Y', strtotime($r['date_requested']));
                                         $dateRel     = !empty($r['date_released']) ? date('m/d/Y', strtotime($r['date_released'])) : null;
 
@@ -844,7 +935,7 @@ $avatarInitials = strtoupper(substr($student['first_name'], 0, 1) . substr($stud
                                         if ($byUnclaimed) $statusLabel = 'Unclaimed';
                                         if ($byStudent)   $statusLabel = 'Cancelled';
                                     ?>
-                                        <tr>
+                                        <tr data-status="<?php echo htmlspecialchars($statusLabel); ?>"<?php echo $r['status'] === 'Cancelled' ? ' data-cancelled="1"' : ''; ?>>
                                             <td><strong><?php echo $padId; ?></strong></td>
                                             <td><?php echo htmlspecialchars($r['document_type']); ?></td>
                                             <td><?php echo $dateReq; ?></td>
@@ -853,6 +944,9 @@ $avatarInitials = strtoupper(substr($student['first_name'], 0, 1) . substr($stud
                                                 <span class="badge <?php echo $cls; ?>"><?php echo $statusLabel; ?></span>
                                                 <?php if ($byRegistrar): ?>
                                                     <span class="badge-rejected">Rejected by Registrar</span>
+                                                    <?php if (!empty($r['rejection_reason'])): ?>
+                                                        <div class="reject-reason" title="Registrar's reason">💬 <?php echo htmlspecialchars($r['rejection_reason']); ?></div>
+                                                    <?php endif; ?>
                                                 <?php elseif ($byUnclaimed): ?>
                                                     <span class="badge-unclaimed">Not picked up</span>
                                                 <?php endif; ?>
@@ -935,7 +1029,6 @@ $avatarInitials = strtoupper(substr($student['first_name'], 0, 1) . substr($stud
         If your parent, guardian, or an authorized representative will claim your requested document, please prepare the following:
     </p>
     <ul class="note-list">
-        <li>Authorization Letter signed by the student.</li>
         <li>Valid ID of the student (photocopy or scanned copy, if required).</li>
         <li>Valid ID of the authorized representative.</li>
     </ul>
@@ -950,16 +1043,7 @@ $avatarInitials = strtoupper(substr($student['first_name'], 0, 1) . substr($stud
     <?php endforeach; ?>
 </div>
 <br>
-<div class="in-person-note">
-    <p><strong>🌐 Request Online, Collect In-Person:</strong> 
-</p>
-    <ul class="note-list">
-        <?php foreach ($inPersonOnlyTypes as $ip): ?>
-            <li><?php echo htmlspecialchars($ip); ?></li>
-        <?php endforeach; ?>
-    </ul>
-</div>
-            
+
 
             </div>
         </div>
@@ -983,6 +1067,19 @@ $avatarInitials = strtoupper(substr($student['first_name'], 0, 1) . substr($stud
                     <div class="acct-form-group">
                         <label>Student ID</label>
                         <input type="text" value="<?php echo htmlspecialchars($student['student_id']); ?>" readonly class="input-readonly">
+                    </div>
+                    <div class="acct-form-group full" id="gl-field-wrap" style="display:none;">
+                        <label>Grade Level <span class="req-star">*</span>
+                            <span class="upload-hint">Required for this document</span>
+                        </label>
+                        <input type="text" name="grade_level" id="gl-input" placeholder="e.g. Grade 12" maxlength="20">
+                    </div>
+                    <div class="acct-form-group full" id="sy-field-wrap" style="display:none;">
+                        <label>School Year Last Attended <span class="req-star">*</span>
+                            <span class="upload-hint">Required for this document — e.g. 2024–2025</span>
+                        </label>
+                        <input type="text" name="school_year_last_attended" id="sy-input"
+                            placeholder="e.g. 2024-2025" maxlength="20">
                     </div>
                     <div class="acct-form-group full">
                         <label>Purpose / Reason <span class="req-star">*</span></label>
@@ -1010,24 +1107,6 @@ $avatarInitials = strtoupper(substr($student['first_name'], 0, 1) . substr($stud
                                 <p class="ruc-hint">School ID, Government ID,<br>or any valid photo ID</p>
                                 <div class="ruc-preview" id="new-id-preview"></div>
                                 <div class="ruc-filename" id="new-id-name"></div>
-                            </div>
-
-                            <div class="req-upload-card" id="new-card-al"
-                                ondragover="cardDragOver(event,'new-card-al')"
-                                ondragleave="cardDragLeave('new-card-al')"
-                                ondrop="cardDrop(event,'new-card-al','new-al-input','new-al-name','new-al-preview')">
-                                <input type="file" name="auth_letter" id="new-al-input"
-                                    accept="image/jpeg,image/png,image/gif,image/webp,application/pdf"
-                                    onchange="cardFileSelected(this,'new-card-al','new-al-name','new-al-preview')">
-                                <button type="button" class="ruc-remove-btn"
-                                    onclick="cardRemoveFile(event,'new-card-al','new-al-input','new-al-name','new-al-preview')">✕</button>
-                                <span class="ruc-check">✅</span>
-                                <span class="ruc-icon">📄</span>
-                                <span class="ruc-title">Authorization Letter</span>
-                                <span class="ruc-optional">Optional</span>
-                                <p class="ruc-hint">If the parent or guardian will claim the document on behalf of the student.</p>
-                                <div class="ruc-preview" id="new-al-preview"></div>
-                                <div class="ruc-filename" id="new-al-name"></div>
                             </div>
                         </div>
                     </div>
@@ -1099,17 +1178,19 @@ $avatarInitials = strtoupper(substr($student['first_name'], 0, 1) . substr($stud
            <div class="acct-form-grid">
     <div class="acct-form-group full">
         <label>Name <span class="account-role-badge-inline">Student</span></label>
-        <input type="text" name="student_name"
+        <input type="text" name="student_name" id="student-name-input" maxlength="201"
             value="<?php echo htmlspecialchars($studentName); ?>">
+        <span class="upload-hint">Edits here automatically fill First Name / Last Name below</span>
     </div>
 </div>
-             <div class="acct-form-group">
-    <label>Student ID Number 🔒</label>
+             <div class="acct-form-group acct-form-group--locked">
+    <label>Student ID Number 🔒 <span class="locked-hint">read-only</span></label>
     <input
         type="text"
         value="<?php echo htmlspecialchars($student['student_id'] ?? ''); ?>"
         readonly
-        class="readonly-field">
+        class="readonly-field locked-field"
+        title="Your Student ID is system-assigned and cannot be changed">
 </div>                 
             <div class="account-divider"></div>
 
@@ -1124,46 +1205,46 @@ $avatarInitials = strtoupper(substr($student['first_name'], 0, 1) . substr($stud
                         placeholder="12-digit LRN">
                 </div>
 
-                
-
                 <div class="acct-form-group">
                     <label>First Name</label>
-                    <input type="text" name="first_name"
+                    <input type="text" name="first_name" maxlength="100"
                         value="<?php echo htmlspecialchars($student['first_name'] ?? ''); ?>" required>
                 </div>
 
                 <div class="acct-form-group">
                     <label>Last Name</label>
-                    <input type="text" name="last_name"
+                    <input type="text" name="last_name" maxlength="100"
                         value="<?php echo htmlspecialchars($student['last_name'] ?? ''); ?>" required>
                 </div>
 
-           <div class="acct-form-group">
-    <label>Grade Level</label>
-    <input type="text" name="grade_level"
-        value="<?php echo htmlspecialchars($student['grade_level'] ?? ''); ?>"
-        placeholder="e.g. Grade 10">
-</div>
-                <div class="acct-form-group">
-                    <label>Strand / Track</label>
-                    <input type="text" name="strand"
-                        value="<?php echo htmlspecialchars($student['strand'] ?? ''); ?>"
-                        placeholder="e.g. STEM, ABM, HUMSS">
-                </div>
+            </div>
 
+            <!-- ═══════════════════ SCHOOL ID PHOTOS (optional replacement) ═══════════════════ -->
+            <div class="account-divider"></div>
+            <div class="form-section-label">🪪 School ID Photos
+                <span class="hint-inline">(optional — upload to replace · JPG/PNG/GIF/WEBP · max 3 MB)</span>
+            </div>
+            <div class="acct-form-grid">
                 <div class="acct-form-group">
-                    <label>School Year Last Attended</label>
-                    <input type="text" name="school_year_last_attended"
-                        value="<?php echo htmlspecialchars($student['school_year_last_attended'] ?? ''); ?>"
-                        placeholder="e.g. 2024-2025">
+                    <label>ID Photo — Front</label>
+                    <input type="file" name="id_front" id="id-front-input"
+                        accept="image/jpeg,image/png,image/gif,image/webp">
+                    <?php if (!empty($student['id_front'])): ?>
+                        <span class="upload-hint">
+                            Current: <a href="../phpLogics/download_profile.php?field=id_front" target="_blank">view file</a>
+                        </span>
+                    <?php endif; ?>
                 </div>
-
                 <div class="acct-form-group">
-                    <label>Date of Birth</label>
-                    <input type="date" name="date_of_birth"
-                        value="<?php echo !empty($student['date_of_birth']) ? htmlspecialchars(date('Y-m-d', strtotime($student['date_of_birth']))) : ''; ?>">
+                    <label>ID Photo — Back</label>
+                    <input type="file" name="id_back" id="id-back-input"
+                        accept="image/jpeg,image/png,image/gif,image/webp">
+                    <?php if (!empty($student['id_back'])): ?>
+                        <span class="upload-hint">
+                            Current: <a href="../phpLogics/download_profile.php?field=id_back" target="_blank">view file</a>
+                        </span>
+                    <?php endif; ?>
                 </div>
-
             </div>
 
             
@@ -1182,6 +1263,20 @@ $avatarInitials = strtoupper(substr($student['first_name'], 0, 1) . substr($stud
                         pattern="[0-9]{7,11}" title="7–11 digits, numbers only"
                         value="<?php echo htmlspecialchars($student['contact'] ?? ''); ?>"
                         placeholder="e.g. 09171234567" maxlength="11">
+                </div>
+            </div>
+
+            <!-- ═══════════════════ 🔒 CHANGE PASSWORD (optional) ═══════════════════ -->
+            <div class="account-divider"></div>
+            <div class="form-section-label">🔒 Change Password <span class="hint-inline">(leave blank to keep your current password)</span></div>
+            <div class="acct-form-grid">
+                <div class="acct-form-group">
+                    <label>Current Password</label>
+                    <input type="password" name="current_password" autocomplete="current-password">
+                </div>
+                <div class="acct-form-group">
+                    <label>New Password <span class="hint-inline">(min. 5 characters)</span></label>
+                    <input type="password" name="new_password" autocomplete="new-password">
                 </div>
             </div>
 
@@ -1320,6 +1415,30 @@ $avatarInitials = strtoupper(substr($student['first_name'], 0, 1) . substr($stud
 </style>
 
 <script>
+/* ── "Name" card ⇄ First/Last name live mirror ─────────────────
+   The combined Name card edits flow into the First Name / Last Name
+   fields (first word = first name, the rest = last name), and edits
+   below rebuild the combined card — so BOTH inputs actually save. */
+(function () {
+    var form     = document.getElementById('account-form');
+    var nameInp  = document.getElementById('student-name-input');
+    var firstInp = form ? form.querySelector('input[name="first_name"]') : null;
+    var lastInp  = form ? form.querySelector('input[name="last_name"]') : null;
+    if (!nameInp || !firstInp || !lastInp) return;
+
+    nameInp.addEventListener('input', function () {
+        var parts = nameInp.value.trim().split(/\s+/);
+        firstInp.value = parts.shift() || '';
+        lastInp.value  = parts.join(' ');
+    });
+
+    function rebuild() {
+        nameInp.value = (firstInp.value.trim() + ' ' + lastInp.value.trim()).trim();
+    }
+    firstInp.addEventListener('input', rebuild);
+    lastInp.addEventListener('input', rebuild);
+})();
+
 function previewAvatar(input) {
     const file = input.files && input.files[0];
     if (!file) return;
@@ -1378,6 +1497,16 @@ function clearAvatar() {
                                 <?php endforeach; ?>
                             </select>
                         </div>
+                        <div class="form-group full" id="edit-gl-wrap" style="display:none;">
+                            <label>Grade Level <span class="req-star">*</span></label>
+                            <input type="text" name="grade_level" id="edit-gl-input"
+                                placeholder="e.g. Grade 12" maxlength="20">
+                        </div>
+                        <div class="form-group full" id="edit-sy-wrap" style="display:none;">
+                            <label>School Year Last Attended <span class="req-star">*</span></label>
+                            <input type="text" name="school_year_last_attended" id="edit-sy-input"
+                                placeholder="e.g. 2024-2025" maxlength="20">
+                        </div>
                         <div class="form-group full">
                             <label>Purpose / Reason <span class="req-star">*</span></label>
                             <input type="text" name="purpose" id="edit-purpose" required>
@@ -1411,29 +1540,6 @@ function clearAvatar() {
                                         <div class="ruc-existing-replace-hint">Upload above to replace</div>
                                     </div>
                                 </div>
-                                <div class="req-upload-card" id="edit-card-al"
-                                    ondragover="cardDragOver(event,'edit-card-al')"
-                                    ondragleave="cardDragLeave('edit-card-al')"
-                                    ondrop="cardDrop(event,'edit-card-al','edit-al-input','edit-al-name','edit-al-preview')">
-                                    <input type="file" name="auth_letter" id="edit-al-input"
-                                        accept="image/jpeg,image/png,image/gif,image/webp,application/pdf"
-                                        onchange="cardFileSelected(this,'edit-card-al','edit-al-name','edit-al-preview')">
-                                    <button type="button" class="ruc-remove-btn"
-                                        onclick="cardRemoveFile(event,'edit-card-al','edit-al-input','edit-al-name','edit-al-preview')">✕</button>
-                                    <span class="ruc-check">✅</span>
-                                    <span class="ruc-icon">📄</span>
-                                    <span class="ruc-title">Authorization Letter</span>
-                                    <span class="ruc-optional">Optional</span>
-                                    <p class="ruc-hint">Upload to replace current file</p>
-                                    <div class="ruc-preview" id="edit-al-preview"></div>
-                                    <div class="ruc-filename" id="edit-al-name"></div>
-                                    <div class="ruc-existing-badge" id="edit-al-existing">
-                                        <a id="edit-al-existing-link" href="#" target="_blank" onclick="event.stopPropagation()">
-                                            📎 View current file
-                                        </a>
-                                        <div class="ruc-existing-replace-hint">Upload above to replace</div>
-                                    </div>
-                                </div>
                             </div>
                         </div>
                     </div>
@@ -1445,6 +1551,9 @@ function clearAvatar() {
 
     
 
+    <!-- Which documents ask for the Grade Level (from the DB, admin-managed
+         per document) — must load BEFORE dashb.js, which reads it at parse time -->
+    <script>window.DOC_GL_MAP = <?php echo json_encode($docGlMap, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;</script>
     <script src="dashb.js"></script>
     <script src="../assets/js/session-timeout.js" defer></script>
     <script>

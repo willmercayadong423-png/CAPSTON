@@ -2,7 +2,7 @@
 require("auth.php");
 header('Content-Type: application/json');
 
-// ── Registrar only ────────────────────────────────────────────────
+// ── Admin only ────────────────────────────────────────────────
 if (strtolower($_SESSION['role'] ?? '') !== 'admin') {
     http_response_code(403);
     echo json_encode(['success' => false, 'message' => 'Forbidden']);
@@ -17,10 +17,15 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !verifyCsrfToken()) {
 }
 
 require_once __DIR__ . '/../database/config.php';
+require_once __DIR__ . '/audit.php';
 
 function clean($val)
 {
-    return htmlspecialchars(strip_tags(trim($val)));
+    /* NOTE: do NOT htmlspecialchars() here — names are escaped at OUTPUT
+       (every page runs htmlspecialchars() on render). Escaping on input
+       as well stores "O&#039;Brien" in the DB, which then displays
+       literally as "O&#039;Brien" after the output-side escape. */
+    return trim(strip_tags((string)$val));
 }
 
 $first    = clean($_POST['first_name'] ?? '');
@@ -31,10 +36,6 @@ $contact  = clean($_POST['contact']    ?? '');
 $password = $_POST['password'] ?? '';
 
 $lrn    = clean($_POST['lrn']                       ?? '');
-$dob    = clean($_POST['date_of_birth']             ?? '');
-$grade  = clean($_POST['grade_level']               ?? '');
-$strand = clean($_POST['strand']                    ?? '');
-$syear  = clean($_POST['school_year_last_attended'] ?? '');
 
 $year = date('Y'); // must be defined BEFORE it is used below
 
@@ -51,6 +52,20 @@ if (!$first || !$last || !$email || !$contact || !$password) {
 }
 if (!in_array($role, $allowedRoles, true)) {
     echo json_encode(['success' => false, 'message' => 'Invalid role']);
+    exit;
+}
+// Server-side enforcement of the same rules the admin form checks client-side
+// (client validation is bypassable — the API must be the last line of defense).
+if (strlen($password) < 5) {
+    echo json_encode(['success' => false, 'message' => 'Password must be at least 5 characters.']);
+    exit;
+}
+if (!preg_match('/^[0-9]{7,11}$/', $contact)) {
+    echo json_encode(['success' => false, 'message' => 'Contact number must be 7–11 digits, numbers only.']);
+    exit;
+}
+if ($lrn !== '' && !preg_match('/^[0-9]{1,12}$/', $lrn)) {
+    echo json_encode(['success' => false, 'message' => 'LRN must be up to 12 digits, numbers only.']);
     exit;
 }
 
@@ -85,15 +100,16 @@ try {
     // 📷 Handle profile photo upload
     $new_photo = null;
     if (isset($_FILES['profile_photo']) && $_FILES['profile_photo']['error'] === UPLOAD_ERR_OK) {
-        $allowed = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
-        $mime    = mime_content_type($_FILES['profile_photo']['tmp_name']);
-        $size    = $_FILES['profile_photo']['size'];
+        $allowed     = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+        $allowed_ext = ['jpg', 'jpeg', 'png', 'gif', 'webp'];
+        $mime        = mime_content_type($_FILES['profile_photo']['tmp_name']);
+        $size        = $_FILES['profile_photo']['size'];
+        $ext         = strtolower(pathinfo($_FILES['profile_photo']['name'], PATHINFO_EXTENSION));
 
-        if (in_array($mime, $allowed) && $size <= 3 * 1024 * 1024) {
+        if (in_array($mime, $allowed) && in_array($ext, $allowed_ext, true) && $size <= 3 * 1024 * 1024) {
             $dir = __DIR__ . '/../uploads/profile_photos/';
             if (!is_dir($dir)) mkdir($dir, 0755, true);
 
-            $ext      = strtolower(pathinfo($_FILES['profile_photo']['name'], PATHINFO_EXTENSION));
             $filename = 'student_' . $student_id . '_' . time() . '.' . $ext;
 
             if (move_uploaded_file($_FILES['profile_photo']['tmp_name'], $dir . $filename)) {
@@ -108,9 +124,9 @@ try {
     $insert = $pdo->prepare("
         INSERT INTO users
             (student_id, profile_photo, first_name, last_name, role, email, contact,
-             lrn, date_of_birth, grade_level, strand, school_year_last_attended,
+             lrn,
              status, password)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ");
 
     $insert->execute([
@@ -122,13 +138,13 @@ try {
         $email,
         $contact,
         $lrn,
-        $dob ?: null,
-        $grade,
-        $strand,
-        $syear,
         'active',
         $hash,
     ]);
+
+    // ── Audit: admin created a new account ──
+    audit_log($pdo, 'USER_CREATED', 'user', $student_id,
+        "{$role} account created for {$first} {$last} ({$email})");
 
     // 📧 Send welcome email with credentials
     require __DIR__ . '/../vendor/autoload.php';
@@ -143,6 +159,8 @@ try {
         $mail->Password   = SMTP_PASS;
         $mail->SMTPSecure = PHPMailer\PHPMailer\PHPMailer::ENCRYPTION_STARTTLS;
         $mail->Port       = SMTP_PORT;
+        $mail->CharSet    = 'UTF-8';
+        $mail->Encoding   = 'base64';
 
         $mail->setFrom(SMTP_FROM, SMTP_FROM_NAME);
         $mail->addAddress($email, $full_name);
@@ -194,10 +212,6 @@ try {
             'email'                     => $email,
             'contact'                   => $contact,
             'lrn'                       => $lrn,
-            'date_of_birth'             => $dob,
-            'grade_level'               => $grade,
-            'strand'                    => $strand,
-            'school_year_last_attended' => $syear,
         ]);
         exit;
     }
@@ -211,10 +225,6 @@ try {
         'email'                      => $email,
         'contact'                    => $contact,
         'lrn'                        => $lrn,
-        'date_of_birth'              => $dob,
-        'grade_level'                => $grade,
-        'strand'                     => $strand,
-        'school_year_last_attended'  => $syear,
     ]);
 
 } catch (PDOException $e) {

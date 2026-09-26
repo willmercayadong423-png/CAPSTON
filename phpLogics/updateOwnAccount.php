@@ -1,6 +1,7 @@
 <?php
 require __DIR__ . "/auth.php";
 include __DIR__ . "/../database/db.php";
+require_once __DIR__ . '/audit.php';
 header('Content-Type: application/json');
 
 // ── Admin or Registrar (own profile only) ─────────────────────────
@@ -24,6 +25,7 @@ $last        = trim($_POST['last_name'] ?? '');
 $email       = filter_var(trim($_POST['email'] ?? ''), FILTER_VALIDATE_EMAIL);
 $contact     = trim($_POST['contact'] ?? '');
 $newPassword = $_POST['password'] ?? '';
+$currentPass = (string)($_POST['current_password'] ?? '');
 
 if ($first === '' || $last === '') {
     echo json_encode(['success' => false, 'message' => 'First and last name are required.']);
@@ -40,6 +42,27 @@ if ($contact !== '' && !preg_match('/^[0-9]{7,11}$/', $contact)) {
 if ($newPassword !== '' && strlen($newPassword) < 5) {
     echo json_encode(['success' => false, 'message' => 'New password must be at least 5 characters.']);
     exit;
+}
+
+/* ── Password changes require the CURRENT password ─────────────────
+ * Without this, anyone using an open registrar/admin session (or
+ * another staff member at the same desk) could silently change
+ * someone else's password. Mirrors the student-side rule. */
+if ($newPassword !== '') {
+    if ($currentPass === '') {
+        echo json_encode(['success' => false, 'message' => 'Please enter your current password to set a new one.']);
+        exit;
+    }
+    $p = $conn->prepare("SELECT password FROM users WHERE id = ?");
+    $p->bind_param("i", $user_id);
+    $p->execute();
+    $meRow = $p->get_result()->fetch_assoc();
+    $p->close();
+
+    if (!$meRow || !password_verify($currentPass, (string)($meRow['password'] ?? ''))) {
+        echo json_encode(['success' => false, 'message' => 'Current password is incorrect.']);
+        exit;
+    }
 }
 
 // ── Duplicate email check ─────────────────────────────────────────
@@ -123,6 +146,11 @@ if ($newPassword !== '') {
 
 if ($upd->execute()) {
     $_SESSION['email'] = $email; // keep session in sync with the new email
+
+    // ── Audit: user updated their own profile ──
+    audit_log($conn, 'PROFILE_UPDATED', 'user', (string)$user_id,
+        'Own profile updated' . ($newPassword !== '' ? ' (password changed)' : ''));
+
     echo json_encode(['success' => true]);
 } else {
     error_log('updateOwnAccount error: ' . $upd->error);

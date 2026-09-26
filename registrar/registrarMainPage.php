@@ -7,15 +7,17 @@ require_role('registrar');
 
 require_once __DIR__ . '/../phpLogics/mailer.php';
 require_once __DIR__ . '/../phpLogics/certificate.php';
+require_once __DIR__ . '/../phpLogics/audit.php';
 
 /* ── Email the student when a request status changes ────────────────
  * Uses the shared mail API (phpLogics/mailer.php). Fires on
  * Processing (accepted), Released, and legacy "Ready for Pickup".
  * Failures are logged server-side and never block the update. */
-function notifyStudentStatus(mysqli $conn, int $req_id, string $newStatus): void
+function notifyStudentStatus(mysqli $conn, int $req_id, string $newStatus, ?string $reason = null, ?string $cancelledBy = null): void
 {
     $notifyable = ['Processing', 'Ready for Pickup', 'Released'];
-    if (!in_array($newStatus, $notifyable, true)) {
+    $isRejected = ($newStatus === 'Cancelled' && $cancelledBy === 'registrar');
+    if (!in_array($newStatus, $notifyable, true) && !$isRejected) {
         return;
     }
 
@@ -36,13 +38,15 @@ function notifyStudentStatus(mysqli $conn, int $req_id, string $newStatus): void
 
     $fullName = trim(($info['first_name'] ?? '') . ' ' . ($info['last_name'] ?? ''));
     $reqNo    = 'REQ-' . str_pad((string) $req_id, 4, '0', STR_PAD_LEFT);
+    $mailStatus = $isRejected ? 'Rejected' : $newStatus;
 
     $result = send_status_email(
         $info['email'],
         $fullName,
         $reqNo,
         $info['document_type'] ?? 'your document',
-        $newStatus
+        $mailStatus,
+        $reason
     );
 
     if (!$result['ok']) {
@@ -144,6 +148,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['release_request'])) {
         error_log("Release mail skipped (no email on file) for REQ-{$req_id}.");
     }
 
+    // ── Audit: registrar released the document with a system e-cert ──
+    audit_log($conn, 'CERTIFICATE_RELEASED', 'document_request', $certData['req_no'],
+        "{$row['document_type']} — e-certificate generated"
+        . (($stu && !empty($stu['email'])) ? " and emailed to {$stu['email']}" : ' (no email on file — NOT emailed)'));
+
     header("Location: registrarMainPage.php?released=1");
     exit();
 }
@@ -167,13 +176,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_status'])) {
         $dbStatus    = $newStatus;
         $cancelledBy = null;
 
+        // ── Audit: remember the current status for the change log ──
+        $old = $conn->prepare("SELECT status FROM document_requests WHERE id = ?");
+        $old->bind_param("i", $req_id);
+        $old->execute();
+        $oldStatus = (string)($old->get_result()->fetch_row()[0] ?? '?');
+        $old->close();
+
         if ($newStatus === 'Unclaimed') {
             // Store as Cancelled with cancelled_by = 'unclaimed'
             $dbStatus    = 'Cancelled';
             $cancelledBy = 'unclaimed';
         } elseif ($newStatus === 'Cancelled') {
-            // Registrar rejection — flagged so students cannot restore it
-            $cancelledBy = 'registrar';
+            // Registrar rejection — flagged so students cannot restore it.
+            // A written reason is REQUIRED so the student knows why.
+            $cancelledBy  = 'registrar';
+            $rejectReason = trim((string)($_POST['reject_reason'] ?? ''));
+            if ($rejectReason === '') {
+                header("Location: registrarMainPage.php?error=reason_required");
+                exit();
+            }
+        } else {
+            $rejectReason = null;
         }
 
         $upd = $conn->prepare(
@@ -184,6 +208,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_status'])) {
                                     WHEN ? IN ('Released','Pending') THEN NULL
                                     ELSE cancelled_by
                                  END,
+                 rejection_reason = CASE
+                                    WHEN ? = 'Cancelled' THEN ?
+                                    ELSE NULL
+                                 END,
                  date_released = CASE
                                     WHEN ? = 'Released' THEN NOW()
                                     WHEN ? = 'Pending'  THEN NULL
@@ -191,12 +219,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_status'])) {
                                  END
              WHERE id = ?"
         );
-        $upd->bind_param("ssssssi", $dbStatus, $dbStatus, $cancelledBy, $dbStatus, $dbStatus, $dbStatus, $req_id);
+        $upd->bind_param("ssssssssi", $dbStatus, $dbStatus, $cancelledBy, $dbStatus, $dbStatus, $rejectReason, $dbStatus, $dbStatus, $req_id);
         $upd->execute();
+
+        // ── Audit: registrar changed the request status ──
+        if ($upd->affected_rows > 0) {
+            audit_log($conn, 'STATUS_CHANGED', 'document_request',
+                'REQ-' . str_pad((string) $req_id, 4, '0', STR_PAD_LEFT),
+                "{$oldStatus} → {$dbStatus}"
+                . ($cancelledBy !== null ? " (cancelled_by: {$cancelledBy})" : '')
+                . (!empty($rejectReason) ? " — Reason: {$rejectReason}" : ''));
+        }
         $upd->close();
 
         // 📧 Notify the student when the request reaches a key status
-        notifyStudentStatus($conn, $req_id, $newStatus);
+        notifyStudentStatus($conn, $req_id, $newStatus, $rejectReason ?? null, $cancelledBy);
     }
     header("Location: registrarMainPage.php");
     exit();
@@ -222,6 +259,22 @@ $cntPending    = countWhere($conn, "status = 'Pending'");
 $cntProcessing = countWhere($conn, "status = 'Processing'");
 $cntReleased   = countWhere($conn, "status = 'Released'");
 $cntToday      = countWhere($conn, "DATE(date_requested) = ?", "s", [$today]);
+$cntRejected   = countWhere($conn, "status = 'Cancelled' AND cancelled_by = 'registrar'");
+
+// ── Dashboard: recent requests (latest 6, any status) ────────────────────
+$recentReq = $conn->prepare(
+    "SELECT dr.id, dr.document_type, dr.status, dr.cancelled_by, dr.date_requested,
+            CONCAT(s.first_name,' ',s.last_name) AS student_name
+     FROM document_requests dr JOIN users s ON dr.user_id = s.id
+     ORDER BY dr.date_requested DESC, dr.id DESC LIMIT 6"
+);
+$recentReq->execute();
+$recentRequests = $recentReq->get_result()->fetch_all(MYSQLI_ASSOC);
+$recentReq->close();
+
+// Friendly greeting by time of day (matches the Manila/MySQL clock)
+$hourNow  = (int)date('G');
+$greeting = $hourNow < 12 ? 'Good morning' : ($hourNow < 17 ? 'Good afternoon' : 'Good evening');
 
 // ── Fetch registrar info for header ───────────────────────────────
 $reg = $conn->prepare("SELECT * FROM users WHERE id = ?");
@@ -232,6 +285,7 @@ $reg->close();
 
 $regName     = $registrar ? htmlspecialchars($registrar['first_name'] . ' ' . $registrar['last_name']) : 'Registrar';
 $regPhoto    = !empty($registrar['profile_photo']) ? $registrar['profile_photo'] : null;
+$firstName   = $registrar ? trim($registrar['first_name']) : 'Registrar';
 $regInitials = $registrar
     ? strtoupper(substr($registrar['first_name'], 0, 1) . substr($registrar['last_name'], 0, 1))
     : 'R';
@@ -327,18 +381,12 @@ function renderRow($r, $isArchived = false)
         : '';
 
     $hasIdPhoto    = !empty($r['id_photo']);
-    $hasAuthLetter = !empty($r['auth_letter']);
-    $hasReceipt    = !empty($r['receipt']);
     $idPhotoAttr    = $hasIdPhoto    ? htmlspecialchars($r['id_photo'],    ENT_QUOTES) : '';
-    $authLetterAttr = $hasAuthLetter ? htmlspecialchars($r['auth_letter'], ENT_QUOTES) : '';
-    $receiptAttr    = $hasReceipt    ? htmlspecialchars($r['receipt'],     ENT_QUOTES) : '';
     $eCertAttr      = !empty($r['e_certificate']) ? htmlspecialchars($r['e_certificate'], ENT_QUOTES) : '';
 
     $viewBtn = "<button type='button' class='btn-view-files'
                     data-req-id=\"{$id}\"
                     data-id-photo=\"{$idPhotoAttr}\"
-                    data-auth-letter=\"{$authLetterAttr}\"
-                    data-receipt=\"{$receiptAttr}\"
                     data-e-cert=\"{$eCertAttr}\"
                     data-purpose=\"{$purpose}\"
                     data-student=\"{$name}\"
@@ -386,15 +434,8 @@ function renderRow($r, $isArchived = false)
                 <button type='submit' class='btn-accept'
                         onclick=\"return confirm('Accept this request?')\">✔ Accept</button>
             </form>";
-        $rejectBtn = "
-            <form method='POST' style='display:inline;'>
-                <input type='hidden' name='csrf_token' value='{$tok}'>
-                <input type='hidden' name='update_status' value='1'>
-                <input type='hidden' name='req_id' value='{$id}'>
-                <input type='hidden' name='new_status' value='Cancelled'>
-                <button type='submit' class='btn-reject'
-                        onclick=\"return confirm('Reject this request?')\">✖ Reject</button>
-            </form>";
+        $rejectBtn = "<button type='button' class='btn-reject'
+                        onclick=\"openRejectModal('{$id}')\">✖ Reject</button>";
         $actions = "<div class='action-group'>{$viewBtn}{$acceptBtn}{$rejectBtn}</div>";
     } else {
         /* Simplified status flow:
@@ -423,7 +464,7 @@ function renderRow($r, $isArchived = false)
                 <input type='hidden' name='csrf_token' value='{$tok}'>
                 <input type='hidden' name='update_status' value='1'>
                 <input type='hidden' name='req_id' value='{$id}'>
-                <select name='new_status' onchange='if(this.value===\"Cancelled\" && !confirm(\"Reject / cancel this request?\")){this.form.reset();return false;}this.form.submit()' class='status-select'>
+                <select name='new_status' onchange='if(this.value===\"Cancelled\" ){this.form.reset();openRejectModal(\"{$id}\");}else{this.form.submit()}' class='status-select'>
                     {$opts}
                 </select>
             </form>";
@@ -458,6 +499,8 @@ function renderRow($r, $isArchived = false)
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Registrar Dashboard — HEHMS</title>
     <link rel="stylesheet" href="registrarCSS.css">
+    <link rel="stylesheet" href="accountInfo.css">
+    <link rel="stylesheet" href="../assets/css/scroll-table.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
@@ -492,7 +535,15 @@ function renderRow($r, $isArchived = false)
             </div>
             <nav class="sidebar-nav">
                 <div class="nav-group-label">Main</div>
-                <a href="registrarMainPage.php" class="nav-main-item requests active">
+                <a href="registrarMainPage.php" class="nav-main-item dashboard active" id="nav-dash" onclick="switchView('dashboard'); return false;">
+                    <div class="nmi-icon">🏠</div>
+                    <div class="nmi-text">
+                        <div class="nmi-title">Dashboard</div>
+                        <div class="nmi-sub">Overview &amp; activity</div>
+                    </div>
+                </a>
+
+                <a href="registrarMainPage.php" class="nav-main-item requests" id="nav-req" onclick="switchView('main'); return false;">
                     <div class="nmi-icon">📋</div>
                     <div class="nmi-text">
                         <div class="nmi-title">Student Requests</div>
@@ -500,7 +551,7 @@ function renderRow($r, $isArchived = false)
                     </div>
                 </a>
 
-                <a href="accountInfo.php" class="nav-main-item records">
+                <a href="registrarMainPage.php?view=account" class="nav-main-item records" id="nav-acc" onclick="switchView('account'); return false;">
                     <div class="nmi-icon">👤</div>
                     <div class="nmi-text">
                         <div class="nmi-title">Account Information</div>
@@ -517,7 +568,7 @@ function renderRow($r, $isArchived = false)
 
         <!-- ══ MAIN ══ -->
         <div class="main-container">
-            <div class="title-section">
+            <div class="title-section" id="shared-title">
                 <h1>Registrar <span>Dashboard</span></h1>
                 <p>Manage student document requests and records.</p>
             </div>
@@ -535,29 +586,85 @@ function renderRow($r, $isArchived = false)
                 <div class="alert-banner">⚠️ <?php echo htmlspecialchars($_GET['release_error']); ?></div>
             <?php endif; ?>
 
-            <!-- Stat cards (clickable — jump to the filtered table) -->
-            <div class="cards">
-                <div class="card card-click" data-goto="Pending" title="Show pending requests">
-                    <span class="card-icon">⏳</span>
-                    <h4>Pending Requests</h4>
-                    <h2><?php echo $cntPending; ?></h2>
+            <!-- ══════ VIEW: DASHBOARD (landing) ══════ -->
+            <div id="view-dashboard">
+
+                <!-- Welcome banner -->
+                <div class="dash-welcome">
+                    <div class="dash-welcome-text">
+                        <h2><?php echo $greeting; ?>, <?php echo htmlspecialchars($firstName); ?>! 👋</h2>
+                        <p><?php echo date('l, F j, Y'); ?> · Registrar's Office · Hilario E. Hermosa Memorial High School</p>
+                    </div>
+                    <div class="dash-welcome-actions">
+                        <a class="btn-export" href="../phpLogics/exportReport.php" target="_blank" title="Printable monthly report (PDF)">🧾 Report PDF</a>
+                    </div>
                 </div>
-                <div class="card card-click" data-goto="Processing" title="Show processing requests">
-                    <span class="card-icon">⚙️</span>
-                    <h4>Processing</h4>
-                    <h2><?php echo $cntProcessing; ?></h2>
+
+                <!-- Stat cards (clickable — jump to the filtered table) -->
+                <div class="cards">
+                    <div class="card card-click" data-goto="Pending" title="Show pending requests">
+                        <span class="card-icon">⏳</span>
+                        <h4>Pending Requests</h4>
+                        <h2><?php echo $cntPending; ?></h2>
+                    </div>
+                    <div class="card card-click" data-goto="Processing" title="Show processing requests">
+                        <span class="card-icon">⚙️</span>
+                        <h4>Processing</h4>
+                        <h2><?php echo $cntProcessing; ?></h2>
+                    </div>
+                    <div class="card card-click" data-goto="Released" data-view="archived" title="Show released requests">
+                        <span class="card-icon">✅</span>
+                        <h4>Released</h4>
+                        <h2><?php echo $cntReleased; ?></h2>
+                    </div>
+                    <div class="card card-click" data-goto="Rejected" data-view="archived" title="Show rejected requests">
+                        <span class="card-icon">🚫</span>
+                        <h4>Rejected</h4>
+                        <h2><?php echo $cntRejected; ?></h2>
+                    </div>
+                    <div class="card card-click" title="Show today's requests">
+                        <span class="card-icon">📅</span>
+                        <h4>Today's Requests</h4>
+                        <h2><?php echo $cntToday; ?></h2>
+                    </div>
                 </div>
-                <div class="card card-click" data-goto="Released" data-view="archived" title="Show released requests">
-                    <span class="card-icon">✅</span>
-                    <h4>Released</h4>
-                    <h2><?php echo $cntReleased; ?></h2>
-                </div>
-                <div class="card card-click" title="Show today's requests">
-                    <span class="card-icon">📅</span>
-                    <h4>Today's Requests</h4>
-                    <h2><?php echo $cntToday; ?></h2>
+
+                <!-- Recent requests -->
+                <div class="dash-grid">
+                    <div class="dash-panel">
+                        <div class="dash-panel-head">
+                            <h3>🗂️ Recent Requests</h3>
+                            <button type="button" class="btn-export" onclick="switchView('main')">View all →</button>
+                        </div>
+                        <div class="dash-recent-list">
+                            <?php if (empty($recentRequests)): ?>
+                                <p class="dash-empty">No requests yet.</p>
+                            <?php else: foreach ($recentRequests as $r):
+                                $badge = statusBadge($r['status'], $r['cancelled_by'] ?? '');
+                            ?>
+                                <div class="dash-recent-item">
+                                    <div class="dash-ri-main">
+                                        <strong>REQ-<?php echo str_pad((string)$r['id'], 4, '0', STR_PAD_LEFT); ?></strong>
+                                        <span class="dash-ri-doc"><?php echo htmlspecialchars($r['document_type']); ?></span>
+                                    </div>
+                                    <div class="dash-ri-side">
+                                        <span class="dash-ri-name"><?php echo htmlspecialchars($r['student_name']); ?></span>
+                                        <div>
+                                            <?php echo $badge; ?>
+                                            <small class="dash-ri-date"><?php echo date('M d, g:i A', strtotime($r['date_requested'])); ?></small>
+                                        </div>
+                                    </div>
+                                </div>
+                            <?php endforeach; endif; ?>
+                        </div>
+                    </div>
+
+                    
                 </div>
             </div>
+
+            <!-- ══════ VIEW: REQUESTS ══════ -->
+            <div id="view-requests" style="display:none;">
 
             <!-- Tab switcher -->
             <div class="switch-btn">
@@ -574,8 +681,8 @@ function renderRow($r, $isArchived = false)
                             <span class="search-icon">🔍</span>
                             <input type="text" class="search" id="search-main" placeholder="Search requests...">
                         </div>
-                        <a class="btn-export" href="../phpLogics/exportRequests.php?type=main"
-                            title="Download the active requests as CSV">⬇ Export CSV</a>
+                        <a class="btn-export" href="../phpLogics/exportReport.php"
+                            title="Printable monthly summary report (PDF)" target="_blank">🧾 Report PDF</a>
                     </div>
                 </div>
 
@@ -585,7 +692,8 @@ function renderRow($r, $isArchived = false)
                     <button type="button" class="chip" data-filter="Pending">⏳ Pending</button>
                     <button type="button" class="chip" data-filter="Processing">⚙️ Processing</button>
                 </div>
-                <table>
+                <div class="tbl-scroll-wrap">
+                <table class="tbl-x" style="min-width: 1000px;">
                     <thead>
                         <tr>
                             <th>Req ID</th>
@@ -606,6 +714,7 @@ function renderRow($r, $isArchived = false)
                         endif; ?>
                     </tbody>
                 </table>
+                </div>
             </div>
 
             <!-- Request history (released / cancelled) -->
@@ -617,8 +726,6 @@ function renderRow($r, $isArchived = false)
                             <span class="search-icon">🔍</span>
                             <input type="text" class="search" id="search-archived" placeholder="Search history...">
                         </div>
-                        <a class="btn-export" href="../phpLogics/exportRequests.php?type=archived"
-                            title="Download the request history as CSV">⬇ Export CSV</a>
                     </div>
                 </div>
 
@@ -629,7 +736,8 @@ function renderRow($r, $isArchived = false)
                     <button type="button" class="chip" data-filter="Rejected">🚫 Rejected</button>
                     <button type="button" class="chip" data-filter="Cancelled">✖ Cancelled</button>
                 </div>
-                <table>
+                <div class="tbl-scroll-wrap">
+                <table class="tbl-x" style="min-width: 1080px;">
                     <thead>
                         <tr>
                             <th>Req ID</th>
@@ -651,7 +759,64 @@ function renderRow($r, $isArchived = false)
                         endif; ?>
                     </tbody>
                 </table>
+                </div>
             </div>
+            </div><!-- /view-requests -->
+
+            <!-- ══════ VIEW: ACCOUNT INFORMATION ══════ -->
+            <div id="view-account" style="display:none;">
+                <div class="title-section">
+                    <h1>Account <span>Information</span></h1>
+                    <p>View and update your own registrar profile.</p>
+                </div>
+
+                <div class="account-card">
+                    <div class="avatar-section">
+                        <div class="account-avatar" id="avatar-display">
+                            <?php if ($regPhoto): ?>
+                                <img src="<?php echo htmlspecialchars('../' . $registrar['profile_photo']); ?>" alt="avatar">
+                            <?php else: ?>
+                                <span><?php echo $regInitials; ?></span>
+                            <?php endif; ?>
+                        </div>
+                        <div>
+                            <label for="photo-input" class="btn-upload">✏️ Change Photo</label>
+                            <input type="file" id="photo-input" accept="image/jpeg,image/png,image/gif,image/webp" style="display:none">
+                            <div id="photo-name" class="file-name"></div>
+                        </div>
+                    </div>
+
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>First Name <span class="req-star">*</span></label>
+                            <input type="text" id="acc-first" maxlength="100" value="<?php echo htmlspecialchars($registrar['first_name'] ?? ''); ?>">
+                        </div>
+                        <div class="form-group">
+                            <label>Last Name <span class="req-star">*</span></label>
+                            <input type="text" id="acc-last" maxlength="100" value="<?php echo htmlspecialchars($registrar['last_name'] ?? ''); ?>">
+                        </div>
+                        <div class="form-group full">
+                            <label>Email <span class="req-star">*</span></label>
+                            <input type="email" id="acc-email" value="<?php echo htmlspecialchars($registrar['email'] ?? ''); ?>">
+                        </div>
+                        <div class="form-group full">
+                            <label>Contact Number</label>
+                            <input type="text" id="acc-contact" inputmode="numeric" maxlength="11"
+                                value="<?php echo htmlspecialchars($registrar['contact'] ?? ''); ?>" placeholder="09XXXXXXXXX">
+                        </div>
+                        <div class="form-group full">
+                            <label>Current Password <span class="hint-inline">(required when changing password)</span></label>
+                            <input type="password" id="acc-current-password" autocomplete="current-password">
+                        </div>
+                        <div class="form-group full">
+                            <label>New Password <span class="hint-inline">(leave blank to keep current)</span></label>
+                            <input type="password" id="acc-password" autocomplete="new-password">
+                        </div>
+                    </div>
+
+                    <button type="button" class="save-btn" id="btn-save-account">💾 Save Changes</button>
+                </div>
+            </div><!-- /view-account -->
         </div><!-- /main-container -->
     </div><!-- /body-layout -->
 
@@ -665,8 +830,32 @@ function renderRow($r, $isArchived = false)
     </footer>
 
 
-    <script src="registrarJS.js"></script>
+    <div class="toast" id="toast"></div>
+
+    <script>var CSRF_TOKEN = <?php echo json_encode(csrf_token()); ?>;</script>
+    <script src="registrarJS.js?v=2"></script>
     <script src="../assets/js/session-timeout.js" defer></script>
+
+    <!-- ══ Reject Reason Modal ══ -->
+    <div id="reject-modal">
+        <div class="reject-modal-box">
+            <h3>✖ Reject Request</h3>
+            <p class="reject-modal-sub">The student will see this reason in their request history. Please be specific.</p>
+            <form method="POST" action="registrarMainPage.php" id="reject-form">
+                <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(csrf_token()); ?>">
+                <input type="hidden" name="update_status" value="1">
+                <input type="hidden" name="new_status" value="Cancelled">
+                <input type="hidden" name="req_id" id="reject-req-id" value="">
+                <label for="reject-reason-input">Reason for rejection <span style="color:#b33;">*</span></label>
+                <textarea id="reject-reason-input" name="reject_reason" rows="3" maxlength="500" required
+                    placeholder="e.g. Incomplete requirements — please attach a valid ID"></textarea>
+                <div class="reject-modal-actions">
+                    <button type="button" class="btn-cancel-modal" onclick="closeRejectModal()">Cancel</button>
+                    <button type="submit" class="btn-reject">✖ Reject Request</button>
+                </div>
+            </form>
+        </div>
+    </div>
 
     <!-- ══ Request Details Modal ══ -->
     <div id="file-modal">

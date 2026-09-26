@@ -352,6 +352,46 @@
     .card h4   { font-size: 11.5px; font-weight: 600; letter-spacing: .8px; text-transform: uppercase; color: var(--text-muted); margin-bottom: 8px; }
     .card h2   { font-family: 'Playfair Display', serif; font-size: 40px; font-weight: 900; color: var(--text-dark); line-height: 1; }
 
+    /* Clickable stat cards — jump to the filtered table */
+    .card-click { cursor: pointer; }
+    .card-click:hover {
+        border-color: var(--green-mid);
+        box-shadow: var(--shadow-sm), 0 6px 18px rgba(107,143,58,.16);
+        transform: translateY(-2px);
+    }
+
+    /* ── Status filter chips (mirrors the registrar dashboard) ── */
+    .filter-chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 14px;
+    }
+
+    .chip {
+        padding: 6px 14px;
+        border-radius: 999px;
+        border: 1.5px solid rgba(138,154,91,.3);
+        background: #fafdf6;
+        color: var(--text-mid);
+        font-size: 12px;
+        font-weight: 600;
+        font-family: 'DM Sans', sans-serif;
+        cursor: pointer;
+        transition: border-color .18s, background .18s, color .18s;
+        white-space: nowrap;
+    }
+    .chip:hover {
+        border-color: var(--green-mid);
+        color: var(--green-dark);
+    }
+    .chip.active {
+        background: var(--green-pale);
+        border-color: var(--green-mid);
+        color: var(--green-dark);
+        font-weight: 700;
+    }
+
     /* ── Tab switch ── */
     .switch-btn { display: flex; gap: 4px; }
 
@@ -706,7 +746,9 @@
     UPLOAD CARDS
     ══════════════════════════════════════ */
     .req-uploads-grid {
-        display: grid; grid-template-columns: 1fr 1fr; gap: 14px;
+        /* single-column now — the Valid ID card takes the full width
+           (the old Authorization Letter card was removed) */
+        display: grid; grid-template-columns: 1fr; gap: 14px;
     }
 
     .req-upload-card {
@@ -1192,47 +1234,6 @@ box-shadow:0 6px 18px rgba(0,0,0,.06);
 
 
 
-    .payment-card{
-
-        background:#fff;
-
-        border-radius:20px;
-
-        padding:25px;
-
-        margin-bottom:25px;
-
-        box-shadow:0 6px 20px rgba(0,0,0,.08);
-
-    }
-
-    .payment-option{
-
-        display:flex;
-
-        gap:15px;
-
-        align-items:flex-start;
-
-        border:1px solid #ddd;
-
-        border-radius:14px;
-
-        padding:18px;
-
-        margin-top:15px;
-
-        cursor:pointer;
-
-    }
-
-    .payment-option:hover{
-
-        border-color:var(--green-mid);
-
-        background:#f7fbf2;
-
-    }
 
 
   .card-title{
@@ -1450,11 +1451,7 @@ box-shadow:0 6px 18px rgba(0,0,0,.06);
     color: var(--green-dark);
 }
 
-/* ══ Payment option radio alignment ══ */
-.payment-option input[type="radio"] {
-    margin-top: 3px;
-    accent-color: var(--green-mid);
-}
+/* ══ (payment UI removed) ══ */
 
 
 .header-avatar-wrapper{
@@ -1529,6 +1526,35 @@ box-shadow:0 6px 18px rgba(0,0,0,.06);
     cursor:not-allowed;
 }
 
+/* ── Student ID Number — system-assigned, NEVER editable ──────────
+   Highlighted in red so students immediately see the field is locked. */
+.acct-form-group--locked label {
+    color: #b91c1c;
+}
+.locked-hint {
+    font-size: 10.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .6px;
+    color: #ffffff;
+    background: #ef4444;
+    border-radius: 999px;
+    padding: 2px 8px;
+    margin-left: 2px;
+}
+.acct-form-group input.locked-field,
+input.locked-field {
+    background: #fef2f2;
+    border: 1.5px solid #f87171;
+    color: #b91c1c;
+    font-weight: 600;
+    cursor: not-allowed;
+}
+input.locked-field:focus {
+    border-color: #f87171;
+    box-shadow: 0 0 0 3px rgba(239,68,68,.12);
+}
+
 .id-preview{
     width:110px;
     height:70px;
@@ -1585,19 +1611,7 @@ box-shadow:0 6px 18px rgba(0,0,0,.06);
     margin: 0 auto 10px;
 }
 
-.qr-payment-grid {
-    display: flex;
-    justify-content: center;
-    gap: 32px;
-    flex-wrap: wrap;
-    margin-top: 20px;
-}
 
-.qr-payment-card {
-    width: 280px;
-    max-width: 90vw;
-    text-align: center;
-}
 
 .qr-img-wrap {
     width: 280px;
@@ -1694,10 +1708,7 @@ box-shadow:0 6px 18px rgba(0,0,0,.06);
 
 
 @media (max-width: 600px) {
-    .qr-payment-grid {
-        gap: 20px;
-    }
-    .qr-payment-card,
+
     .qr-img-wrap {
         width: 92vw;
         max-width: 340px;
@@ -1867,9 +1878,8 @@ box-shadow:0 6px 18px rgba(0,0,0,.06);
     .form-grid { grid-template-columns: 1fr; }
 
     /* ── QR payment cards ── */
-    .qr-payment-grid { gap: 16px; }
 
-    .qr-payment-card,
+
     .qr-img-wrap {
         width: 100%;
         max-width: 320px;
@@ -1880,8 +1890,8 @@ box-shadow:0 6px 18px rgba(0,0,0,.06);
     .price-list { max-width: 100%; }
 
     /* ── Payment options ── */
-    .payment-card { padding: 18px; }
-    .payment-option { padding: 14px; }
+
+
 }
 
 @media (max-width: 480px) {
@@ -1982,3 +1992,18 @@ box-shadow:0 6px 18px rgba(0,0,0,.06);
 
 /* Table headers — deep forest */
 thead tr { background: linear-gradient(135deg, var(--green-dark), var(--green-mid)); }
+
+/* ══════════ Registrar's rejection reason (student history) ══════════ */
+.reject-reason {
+    font-size: 11.5px;
+    color: #8a4a4a;
+    background: #fdf3f3;
+    border: 1px solid rgba(179, 51, 51, .18);
+    border-radius: 8px;
+    padding: 5px 9px;
+    margin-top: 5px;
+    max-width: 260px;
+    white-space: normal;
+    word-break: break-word;
+    line-height: 1.45;
+}

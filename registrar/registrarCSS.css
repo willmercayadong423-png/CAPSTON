@@ -1612,3 +1612,254 @@ td:nth-child(3) { white-space: normal; min-width: 130px; }
 
 .welcome-card { border-bottom: 3px solid var(--gold); }
 thead tr { background: linear-gradient(135deg, var(--green-dark), var(--green-mid)); }
+
+/* ══════════ Reject Reason Modal ══════════ */
+#reject-modal {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, .5);
+    z-index: 1200;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+}
+
+#reject-modal.open { display: flex; }
+
+.reject-modal-box {
+    background: #fff;
+    border-radius: 14px;
+    max-width: 460px;
+    width: 100%;
+    padding: 24px;
+    box-shadow: 0 18px 50px rgba(0, 0, 0, .25);
+}
+
+.reject-modal-box h3 { margin: 0 0 6px; color: #8a2b2b; }
+
+.reject-modal-sub { font-size: 13px; color: #667; margin: 0 0 14px; }
+
+#reject-form label {
+    display: block;
+    font-size: 12.5px;
+    font-weight: 600;
+    margin-bottom: 6px;
+    color: #33402f;
+}
+
+#reject-reason-input {
+    width: 100%;
+    box-sizing: border-box;
+    border: 1.5px solid rgba(138, 154, 91, .35);
+    border-radius: 10px;
+    padding: 10px 12px;
+    font-family: inherit;
+    font-size: 13.5px;
+    resize: vertical;
+    outline: none;
+}
+
+#reject-reason-input:focus { border-color: #8a2b2b; }
+
+.reject-modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 16px;
+}
+
+.reject-modal-actions .btn-cancel-modal {
+    border: 1px solid #c9d2c9;
+    background: #f6f8f6;
+    color: #44513f;
+    border-radius: 8px;
+    padding: 9px 16px;
+    font-size: 13px;
+    cursor: pointer;
+}
+
+/* ══════════════════ REGISTRAR DASHBOARD ══════════════════ */
+
+/* Welcome banner */
+.dash-welcome {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 16px;
+    background: linear-gradient(120deg, #43611f 0%, #5d852f 55%, #6b8f3a 100%);
+    color: #fff;
+    border-radius: 16px;
+    padding: 26px 30px;
+    margin-bottom: 22px;
+    box-shadow: 0 8px 24px rgba(67, 97, 31, .25);
+}
+
+.dash-welcome-text h2 {
+    margin: 0 0 5px;
+    font-family: 'Playfair Display', serif;
+    font-size: 1.45rem;
+    color: #fff;
+}
+
+.dash-welcome-text p {
+    margin: 0;
+    font-size: .82rem;
+    opacity: .85;
+}
+
+.dash-welcome-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+
+.dash-welcome-actions .btn-export {
+    background: rgba(255, 255, 255, .14);
+    border: 1px solid rgba(255, 255, 255, .35);
+    color: #fff;
+    padding: 9px 16px;
+    border-radius: 9px;
+    font-size: .78rem;
+    text-decoration: none;
+    font-weight: 600;
+    transition: background .2s;
+}
+
+.dash-welcome-actions .btn-export:hover { background: rgba(255, 255, 255, .28); }
+
+/* Two-column layout: recent requests + activity */
+.dash-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 18px;
+    margin-top: 22px;
+}
+
+.dash-panel {
+    background: #fff;
+    border: 1px solid rgba(138, 154, 91, .22);
+    border-radius: 14px;
+    padding: 18px 20px;
+    box-shadow: 0 3px 12px rgba(43, 58, 26, .05);
+}
+
+.dash-panel-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+}
+
+.dash-panel-head h3 {
+    margin: 0;
+    font-size: .95rem;
+    color: #2b3a1a;
+}
+
+.dash-panel-head .btn-export {
+    font-size: .72rem;
+    cursor: pointer;
+    border: none;
+    background: none;
+    color: #5d852f;
+    font-weight: 700;
+}
+
+.dash-empty {
+    color: #8a968a;
+    font-size: .82rem;
+    text-align: center;
+    padding: 18px 0;
+    margin: 0;
+}
+
+/* Recent requests list */
+.dash-recent-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    padding: 11px 4px;
+    border-bottom: 1px solid #eef2ea;
+}
+
+.dash-recent-item:last-child { border-bottom: none; }
+
+.dash-ri-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.dash-ri-main strong { font-size: .82rem; color: #2b3a1a; }
+.dash-ri-doc {
+    font-size: .74rem;
+    color: #6a766a;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 210px;
+}
+
+.dash-ri-side { text-align: right; }
+.dash-ri-name { display: block; font-size: .74rem; color: #4a554a; margin-bottom: 3px; }
+.dash-ri-date { color: #93a093; font-size: .68rem; margin-left: 6px; }
+
+/* Activity feed */
+.dash-act-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 10px 4px;
+    border-bottom: 1px solid #eef2ea;
+}
+
+.dash-act-item:last-child { border-bottom: none; }
+
+.dash-act-badge {
+    flex-shrink: 0;
+    font-size: .62rem;
+    font-weight: 700;
+    letter-spacing: .4px;
+    padding: 4px 9px;
+    border-radius: 999px;
+    text-transform: uppercase;
+    margin-top: 2px;
+    white-space: nowrap;
+}
+
+.dash-act-badge.act-green { background: #e3f1e3; color: #2e6b2e; }
+.dash-act-badge.act-red   { background: #fbe4e4; color: #9c2b2b; }
+
+.dash-act-body { min-width: 0; flex: 1; }
+.dash-act-actor { display: block; font-size: .76rem; font-weight: 700; color: #2b3a1a; }
+.dash-act-details {
+    display: block;
+    font-size: .72rem;
+    color: #6a766a;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.dash-act-time { flex-shrink: 0; font-size: .66rem; color: #93a093; margin-top: 3px; }
+
+/* Responsive */
+@media (max-width: 920px) {
+    .dash-grid { grid-template-columns: 1fr; }
+    .dash-welcome { padding: 20px; }
+}
+
+/* ── Dashboard fixes ──
+   • the dashboard is NOT a table container (no .container class)
+   • 5 stat cards → 5 columns on desktop, responsive below */
+#view-dashboard .cards {
+    grid-template-columns: repeat(5, 1fr);
+}
+
+#view-dashboard .card { padding: 20px 16px; }
+
+@media (max-width: 1100px) {
+    #view-dashboard .cards { grid-template-columns: repeat(3, 1fr); }
+}
+
+@media (max-width: 700px) {
+    #view-dashboard .cards { grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (max-width: 460px) {
+    #view-dashboard .cards { grid-template-columns: 1fr; }
+}

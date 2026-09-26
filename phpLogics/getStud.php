@@ -3,7 +3,7 @@ require(__DIR__ . "/auth.php");
 
 header('Content-Type: application/json');
 
-// ── Registrar only ────────────────────────────────────────────────
+// ── Admin only ────────────────────────────────────────────────
 if (strtolower($_SESSION['role'] ?? '') !== 'admin') {
     http_response_code(403);
     echo json_encode(['success' => false, 'message' => 'Forbidden']);
@@ -24,7 +24,7 @@ try {
     $stmt = $pdo->query("
         SELECT id, student_id, first_name, last_name, role, email, contact,
                status, created_at, profile_photo,
-               lrn, date_of_birth, grade_level, strand, school_year_last_attended
+               lrn
         FROM users
         ORDER BY id DESC
     ");

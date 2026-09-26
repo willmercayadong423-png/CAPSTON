@@ -4,33 +4,100 @@
 
 include(__DIR__ . '/../database/db.php');
 include __DIR__ . '/../phpLogics/site_config.php';
+require_once __DIR__ . '/../phpLogics/audit.php';
 
 $errorMessage = "";
+$lockSeconds  = 0;   // > 0 → account temporarily locked, show a live countdown
+
+/* ── Brute-force lockout policy ─────────────────────────────────────
+ * 3 consecutive wrong passwords → account temporarily locked.
+ * Duration escalates with each lockout: 1 → 3 → 5 → 7 … minutes,
+ * capped at 15. A successful sign-in clears the record entirely.
+ * Only wrong passwords for an EXISTING account trigger a lock —
+ * unknown e-mails keep the generic failure + audit entry (no account
+ * to lock, and no way to reveal whether the account exists).
+ * Lock state is evaluated inside SQL so PHP and MySQL can never
+ * disagree about the current time. ───────────────────────────────── */
+const LOCKOUT_MAX_ATTEMPTS = 3;
+const LOCKOUT_CAP_MINUTES  = 15;
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['login'])) {
-    $email = trim($_POST["username"]);
-    $password = trim($_POST["password"]);
 
-    $stmt = $conn->prepare("SELECT * FROM users WHERE email = ? OR student_id = ?");
-$stmt->bind_param("ss", $email, $email);
+    // ── CSRF: the login form carries a per-session token ──
+    // db.php already started the session, so csrf_token() is available here.
+    if (!function_exists('csrf_token')) {
+        function csrf_token(): string
+        {
+            if (empty($_SESSION['csrf_token'])) {
+                $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+            }
+            return $_SESSION['csrf_token'];
+        }
+    }
+    if (!isset($_POST['csrf_token']) || !hash_equals(csrf_token(), (string)$_POST['csrf_token'])) {
+        $errorMessage = "Your session expired. Please try again.";
+    } else {
+
+    $email    = trim($_POST["username"]);
+    // ⚠ Do NOT trim the password: profile updates store it untrimmed, so a
+    // password containing leading/trailing spaces could never log in here.
+    $password = (string)($_POST["password"] ?? '');
+
+    // Authentication is by e-mail OR Student ID (see schema.sql note:
+    // "Authentication is by e-mail OR Student ID"). Both are unique
+    // columns, so at most one account can ever match.
+    $stmt = $conn->prepare(
+        "SELECT *,
+                (locked_until IS NOT NULL AND locked_until > NOW()) AS is_locked,
+                IF(locked_until IS NOT NULL AND locked_until > NOW(),
+                   TIMESTAMPDIFF(SECOND, NOW(), locked_until), 0)    AS lock_seconds
+         FROM users WHERE email = ? OR student_id = ?"
+    );
+    $stmt->bind_param("ss", $email, $email);
     $stmt->execute();
     $result = $stmt->get_result();
 
     if ($result->num_rows > 0) {
         $row = $result->fetch_assoc();
+        $actorInfo = [
+            'id'   => (int)$row['id'],
+            'name' => trim($row['first_name'] . ' ' . $row['last_name']),
+            'role' => $row['role'],
+        ];
 
-        // Verify the password FIRST so we never reveal account
-        // existence/status to someone who doesn't know the credentials.
-        if (password_verify($password, $row["password"])) {
+        /* 1 · Active lock? Reject even a correct password until expiry. */
+        if ((int)$row['is_locked'] === 1) {
+            $lockSeconds  = (int)$row['lock_seconds'];
+            $errorMessage = "Too many failed attempts — account is temporarily locked. Try again later.";
+            audit_log($conn, 'LOGIN_LOCKED', 'auth', (string)$row['id'],
+                "Sign-in rejected for locked account '{$email}' ({$lockSeconds}s remaining)", $actorInfo);
+        }
+
+        /* 2 · Correct password? */
+        elseif (password_verify($password, $row["password"])) {
 
             // 🚫 BLOCK archived users (only after password is proven)
             if (strtolower($row["status"]) === "archived") {
                 $errorMessage = "Your account is archived.";
+                audit_log($conn, 'LOGIN_BLOCKED', 'auth', (string)$row['id'],
+                    "Blocked sign-in — account '{$email}' is archived", $actorInfo);
             } else {
+
+                // ✅ Success clears the lockout record completely.
+                $clear = $conn->prepare(
+                    "UPDATE users
+                        SET failed_login_count = 0, lockout_count = 0, locked_until = NULL
+                      WHERE id = ?");
+                $clear->bind_param("i", $row['id']);
+                $clear->execute();
+                $clear->close();
 
                 $_SESSION["email"] = $row["email"];
                 $_SESSION["role"] = $row["role"];
                 $_SESSION["user_id"] = $row["id"];
+
+                audit_log($conn, 'LOGIN', 'auth', (string)$row['id'],
+                    "Signed in as {$row['role']}", $actorInfo);
 
                 session_regenerate_id(true);
 
@@ -43,15 +110,59 @@ $stmt->bind_param("ss", $email, $email);
                 }
                 exit();
             }
-        } else {
-            $errorMessage = "Invalid username or password!";
+        }
+
+        /* 3 · Wrong password → count it; 3rd strike locks the account. */
+        else {
+            $failed = (int)$row['failed_login_count'] + 1;
+
+            if ($failed >= LOCKOUT_MAX_ATTEMPTS) {
+                // Escalating duration: 1 → 3 → 5 → 7 … capped at 15 min.
+                $lockouts = (int)$row['lockout_count'] + 1;
+                $minutes  = min(1 + 2 * ($lockouts - 1), LOCKOUT_CAP_MINUTES);
+
+                $lock = $conn->prepare(
+                    "UPDATE users
+                        SET failed_login_count = 0,
+                            lockout_count      = ?,
+                            locked_until       = DATE_ADD(NOW(), INTERVAL ? MINUTE)
+                      WHERE id = ?");
+                $lock->bind_param("iii", $lockouts, $minutes, $row['id']);
+                $lock->execute();
+                $lock->close();
+
+                $lockSeconds  = $minutes * 60;
+                $errorMessage = "Too many failed attempts — account locked for {$minutes} minute"
+                              . ($minutes > 1 ? "s" : "") . ".";
+                audit_log($conn, 'LOGIN_LOCKED', 'auth', (string)$row['id'],
+                    "Account '{$email}' locked for {$minutes} min after " . LOCKOUT_MAX_ATTEMPTS
+                    . " failed attempts (lockout #{$lockouts})", $actorInfo);
+            } else {
+                $count = $conn->prepare("UPDATE users SET failed_login_count = ? WHERE id = ?");
+                $count->bind_param("ii", $failed, $row['id']);
+                $count->execute();
+                $count->close();
+
+                $errorMessage = "Invalid username or password!";
+                audit_log($conn, 'LOGIN_FAILED', 'auth', (string)$row['id'],
+                    "Wrong password for '{$email}' ({$failed}/" . LOCKOUT_MAX_ATTEMPTS . ")", $actorInfo);
+            }
         }
     } else {
         $errorMessage = "Invalid username or password!";
+        audit_log($conn, 'LOGIN_FAILED', 'auth', null,
+            "Unknown username '{$email}'", ['name' => $email, 'role' => 'unknown']);
     }
 
     $stmt->close();
+    } // end CSRF-passed branch
 }
+
+// Ensure a CSRF token exists for the form below (no-op if already set)
+if (empty($_SESSION['csrf_token'])) {
+    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+}
+$loginCsrfToken = $_SESSION['csrf_token'];
 
 // Hero photo panel — replace with real campus/school photos in assets/img/.
 // Add or remove array entries and the panel adjusts automatically.
@@ -103,14 +214,14 @@ $heroSlides = [
             <div class="photo-panel__content">
                 <h1>Every record, one request away.</h1>
                 <p class="lead">
-                    Request Form 137, diplomas, and other academic documents online,
+                    Request Good Moral, and other academic documents online,
                     then follow each one from submission to release — no campus visit required.
                 </p>
 
                 <div class="info-row">
                     <div class="info-row__item">
                         <strong>Request documents</strong>
-                        <span>Form 137, diplomas, Good Moral, and more.</span>
+                        <span>Certificate of Completion/Graduation, Good Moral, and more.</span>
                     </div>
                     <div class="info-row__item">
                         <strong>Track progress</strong>
@@ -146,13 +257,13 @@ $heroSlides = [
 
                 <div class="rule"></div>
 
-                <p class="signin-label">Sign in to continue</p>
 
                 <form method="POST" novalidate>
+                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($loginCsrfToken); ?>">
 
                     <div class="field">
-                        <label for="username">Username</label>
-                        <input type="text" name="username" id="username" required autocomplete="username">
+                        <label for="username">Email or Student ID</label>
+                        <input type="text" name="username" id="username" required autocomplete="email">
                     </div>
 
                     <div class="field field--password">
@@ -166,7 +277,7 @@ $heroSlides = [
                 </form>
 
                 <?php if ($errorMessage): ?>
-                    <div class="notice">⚠ <?php echo htmlspecialchars($errorMessage); ?></div>
+                    <div class="notice"<?php echo $lockSeconds > 0 ? ' id="lockNotice" data-seconds="' . (int)$lockSeconds . '"' : ''; ?>>⚠ <?php echo htmlspecialchars($errorMessage); ?></div>
                 <?php endif; ?>
 
                 <?php if (isset($_GET['loggedout'])): ?>
@@ -250,6 +361,31 @@ $heroSlides = [
                 togglePassword.textContent = "👁";
             }
         });
+
+        // ── Live countdown on the temporary lockout notice ──────────
+        (function () {
+            var box = document.getElementById('lockNotice');
+            if (!box) return;
+
+            var s = parseInt(box.dataset.seconds, 10);
+            if (!(s > 0)) return;
+
+            var base = box.textContent;
+
+            function tick() {
+                if (s <= 0) {
+                    clearInterval(timer);
+                    box.textContent = '⚠ The lock has expired — you may try signing in now.';
+                    return;
+                }
+                var m = Math.floor(s / 60), r = s % 60;
+                box.textContent = base + ' (' + (m > 0 ? m + 'm ' : '') + r + 's left)';
+                s--;
+            }
+
+            tick();
+            var timer = setInterval(tick, 1000);
+        })();
     </script>
 
 </body>

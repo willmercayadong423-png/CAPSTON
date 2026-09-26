@@ -2,6 +2,7 @@
 require __DIR__ . '/../database/db.php';   // db.php already loads config.php (require_once)
 require_once __DIR__ . '/../vendor/autoload.php';
 require __DIR__ . '/../phpLogics/site_config.php';
+require_once __DIR__ . '/../phpLogics/audit.php';
 
 use PHPMailer\PHPMailer\PHPMailer;
 use PHPMailer\PHPMailer\Exception;
@@ -48,6 +49,8 @@ function sendCredentialsEmail($email, $full_name, $student_id, $temp_password) {
     $mail->Password   = SMTP_PASS;
     $mail->SMTPSecure = PHPMailer\PHPMailer\PHPMailer::ENCRYPTION_STARTTLS;
     $mail->Port       = SMTP_PORT;
+    $mail->CharSet    = 'UTF-8';
+    $mail->Encoding   = 'base64';
 
     $mail->setFrom(SMTP_FROM, SMTP_FROM_NAME);
     $mail->addAddress($email, $full_name);
@@ -90,33 +93,45 @@ function sendCredentialsEmail($email, $full_name, $student_id, $temp_password) {
 $step    = 'form';
 $message = '';
 
+/* Ensure a CSRF token exists for the form below (db.php already
+   started the session — same helper approach as the login page). */
+if (empty($_SESSION['csrf_token'])) {
+    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+}
+$loginCsrfToken = $_SESSION['csrf_token'];
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $student_id = trim($_POST['student_id']    ?? '');
-    $dob        = trim($_POST['date_of_birth'] ?? '');
     $first_name = trim($_POST['first_name']    ?? '');
     $last_name  = trim($_POST['last_name']     ?? '');
 
-    if (!$student_id || !$dob || !$first_name || !$last_name) {
+    if (!isset($_POST['csrf_token']) || !hash_equals($loginCsrfToken, (string)$_POST['csrf_token'])) {
+        $step    = 'error';
+        $message = 'Your session expired. Please try again.';
+    } elseif (!$student_id || !$first_name || !$last_name) {
         $step    = 'error';
         $message = 'Please fill in all fields.';
     } else {
-        // Match against student_id, date_of_birth, first_name, AND last_name
+        // Match against student_id, first_name, AND last_name
+        // (date_of_birth was removed from the system)
         $stmt = $conn->prepare("
-            SELECT id, first_name, last_name, email, student_id
+            SELECT id, first_name, last_name, email, student_id, role
             FROM users
             WHERE student_id    = ?
-              AND date_of_birth = ?
               AND LOWER(first_name) = LOWER(?)
               AND LOWER(last_name)  = LOWER(?)
               AND status = 'active'
         ");
-        $stmt->bind_param("ssss", $student_id, $dob, $first_name, $last_name);
+        $stmt->bind_param("sss", $student_id, $first_name, $last_name);
         $stmt->execute();
         $result = $stmt->get_result();
 
         if ($result->num_rows === 0) {
             $step    = 'error';
             $message = 'The details you entered do not match our records. Please check and try again.';
+            audit_log($conn, 'CREDENTIAL_REQUEST_FAILED', 'auth', null,
+                "Verification failed for student_id '{$student_id}' — details did not match any active account",
+                ['name' => $student_id, 'role' => 'unknown']);
         } else {
             $student   = $result->fetch_assoc();
             $email     = $student['email'];
@@ -126,6 +141,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (checkRateLimit($conn, $email)) {
                 $step    = 'error';
                 $message = 'Too many resend requests. Please wait 1 hour before trying again, or contact your registrar.';
+                audit_log($conn, 'CREDENTIAL_REQUEST_FAILED', 'user', $sid,
+                    'Rate limit exceeded (3+ attempts within 1 hour)',
+                    ['id' => (int)$student['id'], 'name' => $full_name, 'role' => $student['role'] ?? '']);
             } else {
                 logResendAttempt($conn, $email);
 
@@ -133,18 +151,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     // ── Secure flow: issue a NEW temporary password ──
                     // The original password is hashed in the DB and can never
                     // be "resent". A new temp password replaces it instead.
+                    //
+                    // ⚠ ORDER MATTERS: send the email FIRST and only commit
+                    // the new hash after it was delivered. If SMTP fails we
+                    // leave the old password intact — the account is never
+                    // locked out with a password nobody knows.
                     $temp_password = generateTempPassword(10);
-                    $new_hash      = password_hash($temp_password, PASSWORD_DEFAULT);
 
+                    sendCredentialsEmail($email, $full_name, $sid, $temp_password);
+
+                    // Email delivered — now persist the temp password.
+                    $new_hash = password_hash($temp_password, PASSWORD_DEFAULT);
                     $upd = $conn->prepare("UPDATE users SET password = ? WHERE id = ?");
                     $upd->bind_param("si", $new_hash, $student['id']);
                     $upd->execute();
                     $upd->close();
 
-                    sendCredentialsEmail($email, $full_name, $sid, $temp_password);
+                    audit_log($conn, 'CREDENTIAL_REQUEST_SUBMITTED', 'user', $sid,
+                        "Temporary password issued and emailed to {$email}",
+                        ['id' => (int)$student['id'], 'name' => $full_name, 'role' => $student['role'] ?? '']);
+
                     $step    = 'success';
                     $message = 'A temporary password has been sent to your registered email address.';
-                } catch (Exception $e) {
+                } catch (Throwable $e) {
                     // Log details server-side; never expose them to the user
                     error_log('Forgot-password mail error: ' . $e->getMessage());
                     $step    = 'error';
@@ -169,9 +198,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <link rel="stylesheet" href="mainPageCSS.css">
     <link rel="stylesheet" href="forgotPass.css">
     <?php echo theme_head(); // admin-managed brand color ?>
-
-    <!-- Apply dark mode before paint to avoid flash -->
-    <script src="forgotPass.js"></script>
 </head>
 <body>
 
@@ -209,12 +235,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 <?php else: ?>
 
                     <div class="info-box">
-                        Enter your <strong>First Name</strong>, <strong>Last Name</strong>,
-                        <strong>Student ID</strong>, and <strong>Date of Birth</strong> to verify
+                        Enter your <strong>First Name</strong>, <strong>Last Name</strong>, and
+                        <strong>Student ID</strong> to verify
                         your identity. A temporary password will be sent to your registered email.
                     </div>
 
                     <form method="POST" action="">
+                        <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($loginCsrfToken) ?>">
 
                         <!-- Name row: First + Last side by side -->
                         <div class="name-row">
@@ -260,17 +287,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             >
                         </div>
                         <p class="hint">The Student ID given to you by the registrar.</p>
-
-                        <label class="login-label" for="date_of_birth">Date of Birth</label>
-                        <div class="input-wrap">
-
-                            <input
-                                type="date"
-                                id="date_of_birth"
-                                name="date_of_birth"
-                                required
-                            >
-                        </div>
 
                         <button type="submit" class="login-btn">Verify &amp; Send Temporary Password</button>
 

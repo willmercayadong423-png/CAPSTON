@@ -1,6 +1,7 @@
 <?php
 require __DIR__ . "/auth.php";
 include __DIR__ . "/../database/db.php";
+require_once __DIR__ . '/audit.php';
 header('Content-Type: application/json');
 
 // ── Admin only ────────────────────────────────────────────────────
@@ -72,7 +73,9 @@ foreach ($textSettings as $key => $rule) {
         echo json_encode(['success' => false, 'message' => 'Please enter a valid registrar email.']);
         exit;
     }
-    $val = htmlspecialchars($val, ENT_QUOTES, 'UTF-8');   // stored escaped, pages print raw
+    // NOTE: stored RAW on purpose — every page that prints these values
+    // escapes at output with htmlspecialchars(). Escaping here as well
+    // would double-escape ("&" → "&amp;amp;") on pages that escape again.
     $stmt = $conn->prepare(
         "INSERT INTO site_settings (setting_key, setting_value) VALUES (?, ?)
          ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)"
@@ -128,6 +131,11 @@ if (isset($_FILES['logo']) && $_FILES['logo']['error'] === UPLOAD_ERR_OK) {
         $stmt->execute();
         $stmt->close();
 
+        // ── Audit: branding change (this branch returns early below,
+        //    so the shared audit at the bottom would never fire) ──
+        audit_log($conn, 'SITE_SETTINGS_UPDATED', 'settings', null,
+            'Site logo updated');
+
         // Bust browser cache of the old logo
         echo json_encode(['success' => true, 'logo_url' => site_url($webPath) . '?v=' . time()]);
         exit;
@@ -138,4 +146,7 @@ if (isset($_FILES['logo']) && $_FILES['logo']['error'] === UPLOAD_ERR_OK) {
 }
 
 // Color-only save (or nothing uploaded at all)
+audit_log($conn, 'SITE_SETTINGS_UPDATED', 'settings', null,
+    'Site settings saved' . ($designTheme !== '' ? " (theme: {$designTheme})" : '') . ($color !== '' ? " (color: {$color})" : ''));
+
 echo json_encode(['success' => true, 'theme_color' => $color ?: null]);

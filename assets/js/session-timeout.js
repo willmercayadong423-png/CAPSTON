@@ -13,7 +13,7 @@
 (function () {
     'use strict';
 
-    var LIMIT_MS  = 5 * 60 * 1000; // 5 minutes
+    var LIMIT_MS  = 15 * 60 * 1000; // 15 minutes — matches the server-side $timeout (900s) in auth.php
     var LOGIN_URL = '../auth/mainPage.php?timeout=1'; // all authed pages sit one level deep
     var timer;
 

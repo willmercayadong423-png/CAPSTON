@@ -10,7 +10,7 @@
  * edits the default text):
  *   {NAME}     → student full name (rendered large, centered)
  *   {LRN}      → LRN
- *   {GRADE}    → grade/strand or last school year attended
+ *   {GRADE}    → grade level or last school year attended
  *   {PURPOSE}  → the request purpose
  *
  * Public functions:
@@ -29,9 +29,10 @@ function certificate_fetch(mysqli $conn, int $req_id): ?array
 {
     $q = $conn->prepare(
         "SELECT dr.id AS req_id, dr.document_type, dr.purpose, dr.date_requested,
-                dr.e_certificate, s.id AS student_pk, s.student_id AS school_id,
-                s.first_name, s.last_name, s.lrn, s.grade_level, s.strand,
-                s.school_year_last_attended
+                dr.e_certificate, dr.grade_level AS req_grade_level,
+                dr.school_year_last_attended AS req_school_year,
+                s.id AS student_pk, s.student_id AS school_id,
+                s.first_name, s.last_name, s.lrn
          FROM document_requests dr
          JOIN users s ON dr.user_id = s.id
          WHERE dr.id = ?"
@@ -40,7 +41,17 @@ function certificate_fetch(mysqli $conn, int $req_id): ?array
     $q->execute();
     $row = $q->get_result()->fetch_assoc();
     $q->close();
-    return $row ?: null;
+
+    if (!$row) {
+        return null;
+    }
+
+    // Grade Level and School Year come from the REQUEST the student filed
+    // (the account-level fields were removed from the system).
+    $row['grade_level']               = trim((string)($row['req_grade_level'] ?? ''));
+    $row['school_year_last_attended'] = trim((string)($row['req_school_year'] ?? ''));
+
+    return $row;
 }
 
 /* ── Default editable fields (auto-filled from the record) ───────── */
@@ -49,9 +60,6 @@ function certificate_defaults(array $row, string $officerName = ''): array
     $docType = $row['document_type'];
 
     $title = strtoupper($docType);
-    if ($docType === 'SF10/Form 137') {
-        $title = 'CERTIFICATION — FORM 137 (SF10)';
-    }
 
     // Per-document default bodies — official DepEd wording.
     // Placeholders: {NAME} renders as SURNAME, FIRSTNAME (all caps),
@@ -71,17 +79,11 @@ function certificate_defaults(array $row, string $officerName = ''): array
             'This is to certify that {NAME} graduated from HILARIO E. HERMOSA MEMORIAL HIGH SCHOOL during the school year {SY}.',
         'Certificate of Enrollment' =>
             'This is to certify that {NAME} is officially enrolled at HILARIO E. HERMOSA MEMORIAL HIGH SCHOOL.',
-        'Certificate of Registration' =>
-            'This is to certify that {NAME} is officially enrolled at HILARIO E. HERMOSA MEMORIAL HIGH SCHOOL.',
         'Certificate of Grades' =>
             'This is to certify that {NAME} was a bonafide student of HILARIO E. HERMOSA MEMORIAL HIGH SCHOOL and that a copy of his/her report card is available in the records of this school.',
         'Certificate of Good Moral' => $goodMoral,
         'Certificate of Transfer' =>
             'This is to certify that {NAME} was a bonafide student of HILARIO E. HERMOSA MEMORIAL HIGH SCHOOL and is eligible for transfer to another school.',
-        'SF10/Form 137' =>
-            'This is to certify that the Form 137 (SF10) permanent record of {NAME} is on file at HILARIO E. HERMOSA MEMORIAL HIGH SCHOOL.',
-        'YearBook' =>
-            'This is to certify that {NAME} was a bonafide student of HILARIO E. HERMOSA MEMORIAL HIGH SCHOOL.',
     ];
 
     $body = $bodies[$docType]
@@ -93,8 +95,10 @@ function certificate_defaults(array $row, string $officerName = ''): array
     return [
         'title'        => $title,
         'body'         => $body,
-        // Default signatory for every certificate (still editable per release)
-        'officer_name' => 'EDUARD B. GOBOLI',
+        // Default signatory: the registrar currently logged in (passed in
+        // by the release flow); falls back to the Teacher-In-Charge when
+        // no name is available (e.g. system-generated previews).
+        'officer_name' => $officerName !== '' ? mb_strtoupper($officerName) : 'EDUARD B. GOBOLI',
         'officer_title'=> 'Teacher-In-Charge',
         'cert_date'    => date('Y-m-d'),
         'remarks'      => '',
@@ -105,11 +109,10 @@ function certificate_defaults(array $row, string $officerName = ''): array
 function certificate_grade_text(array $row): string
 {
     $grade = trim($row['grade_level'] ?? '');
-    $strand = trim($row['strand'] ?? '');
     $sy = trim($row['school_year_last_attended'] ?? '');
 
     if ($grade !== '') {
-        return ', currently enrolled in ' . $grade . ($strand !== '' ? ' — ' . $strand . ' Strand' : '');
+        return ', currently enrolled in ' . $grade;
     }
     if ($sy !== '') {
         return ', who last attended this school in School Year ' . $sy;

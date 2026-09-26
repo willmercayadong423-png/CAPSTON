@@ -296,3 +296,201 @@ tr.view-alumni:hover { opacity: 1; }
 
 .to-name { font-size: 12.5px; font-weight: 700; color: #1a2409; }
 .to-desc { font-size: 10.5px; color: #7a8a65; line-height: 1.45; }
+
+/* ══════════════ Audit Logs view ══════════════ */
+.audit-wrap { padding-bottom: 8px; }
+
+.audit-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+    padding: 14px 18px;
+    background: #f8faf8;
+    border-bottom: 1px solid #e4eae4;
+}
+
+.audit-filters select,
+.audit-filters input[type="text"],
+.audit-filters input[type="date"] {
+    padding: 8px 12px;
+    border: 1px solid #d5ddd5;
+    border-radius: 8px;
+    font-size: 13px;
+    font-family: inherit;
+    background: #fff;
+    color: #2f3a2f;
+}
+
+.audit-filters select { min-width: 160px; }
+.audit-filters input[type="text"] { min-width: 220px; flex: 1; }
+
+.audit-filters .btn-new-request {
+    text-decoration: none;
+    display: inline-block;
+    padding: 8px 16px;
+    font-size: 13px;
+    white-space: nowrap;
+}
+
+.audit-clear {
+    font-size: 13px;
+    color: #6b7a6b;
+    text-decoration: underline;
+}
+
+.audit-badge {
+    display: inline-block;
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-size: 11.5px;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+    white-space: nowrap;
+}
+
+.audit-badge.ab-green {
+    background: #e3f1e3;
+    color: #2e6b2e;
+}
+
+.audit-badge.ab-red {
+    background: #fbe4e4;
+    color: #9c2b2b;
+}
+
+.audit-when {
+    white-space: nowrap;
+    font-size: 12.5px;
+    color: #55605a;
+}
+
+.audit-role {
+    font-size: 11.5px;
+    color: #8a968a;
+}
+
+.audit-target { white-space: nowrap; font-weight: 600; }
+
+.audit-details { color: #4a554a; }
+
+.audit-ip {
+    font-family: monospace;
+    font-size: 12px;
+    color: #7d887d;
+    white-space: nowrap;
+}
+
+.audit-pager {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 14px;
+    padding: 12px 18px;
+    font-size: 13px;
+    color: #55605a;
+    border-top: 1px solid #e4eae4;
+}
+
+.audit-pager a {
+    color: #3a5a3a;
+    font-weight: 600;
+    text-decoration: none;
+    padding: 5px 10px;
+    border: 1px solid #cfdacf;
+    border-radius: 8px;
+}
+
+.audit-pager a:hover { background: #eef4ee; }
+
+/* ══════════ Scrollable audit table (readable columns) ══════════ */
+/* The audit view deliberately does NOT reuse .tbl-header-table /
+   .table-scroll-body (table-layout:fixed squeezes 6 columns into
+   small screens). Instead: one table, horizontal scrollbar when
+   the screen is narrow, sticky header, comfortable column widths. */
+
+.audit-table-scroll {
+    overflow: auto;                 /* horizontal AND vertical scroll */
+    max-height: 620px;
+    background: #fff;
+    border: 1px solid #e4eae4;
+    border-radius: 8px;
+}
+
+.audit-table-scroll::-webkit-scrollbar       { height: 9px; width: 6px; }
+.audit-table-scroll::-webkit-scrollbar-thumb { background: rgba(107,143,58,.35); border-radius: 5px; }
+.audit-table-scroll::-webkit-scrollbar-thumb:hover { background: rgba(107,143,58,.55); }
+
+.audit-table {
+    width: 100%;
+    min-width: 1200px;              /* below this width → horizontal scrollbar */
+    border-collapse: collapse;
+    table-layout: auto;
+    font-size: 13px;
+}
+
+.audit-table thead th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: #eef4ee;
+    color: #33402f;
+    text-align: left;
+    padding: 12px 16px;
+    font-size: 11.5px;
+    letter-spacing: .5px;
+    text-transform: uppercase;
+    border-bottom: 2px solid #d8e4d8;
+    white-space: nowrap;
+}
+
+.audit-table tbody td {
+    padding: 11px 16px;
+    border-bottom: 1px solid #eef2ee;
+    vertical-align: top;
+}
+
+.audit-table tbody tr:hover { background: #f7faf7; }
+
+/* Comfortable per-column minimum widths */
+.audit-table th:nth-child(1), .audit-table td:nth-child(1) { min-width: 150px; } /* Date & Time */
+.audit-table th:nth-child(2), .audit-table td:nth-child(2) { min-width: 170px; } /* Actor */
+.audit-table th:nth-child(3), .audit-table td:nth-child(3) { min-width: 160px; } /* Action */
+.audit-table th:nth-child(4), .audit-table td:nth-child(4) { min-width: 190px; } /* Target */
+.audit-table td:nth-child(5)                               { min-width: 280px; } /* Details */
+.audit-table th:nth-child(6), .audit-table td:nth-child(6) { min-width: 120px; } /* IP */
+
+/* ═════════════════════════════════════════
+   REQUESTABLE DOCUMENTS (Information view)
+   ═════════════════════════════════════════ */
+.doc-item {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    border: 1px solid #e5e7eb; border-radius: 12px;
+    padding: 12px 14px; margin-bottom: 10px;
+    background: #fff; transition: border-color .15s ease;
+}
+.doc-item:hover { border-color: #c7d2c7; }
+.doc-item.inactive { opacity: .62; background: #fafafa; }
+
+.doc-item-name { font-weight: 600; flex: 1 1 220px; }
+
+.doc-chip {
+    display: inline-block; font-size: .66rem; font-weight: 700;
+    padding: 3px 10px; border-radius: 999px;
+    text-transform: uppercase; letter-spacing: .05em;
+}
+.doc-chip.active   { background: #dcfce7; color: #166534; }
+.doc-chip.inactive { background: #f3f4f6; color: #6b7280; }
+.doc-chip.gl       { background: #fef3c7; color: #92400e; text-transform: none; letter-spacing: 0; }
+
+.doc-usage { font-size: .75rem; color: #6b7280; white-space: nowrap; }
+
+.doc-item-actions { display: flex; gap: 8px; }
+.doc-item-actions button { padding: 6px 12px; font-size: .78rem; }
+
+.doc-gl-check {
+    display: flex; align-items: center; gap: 8px;
+    font-size: .85rem; color: #4b5563; cursor: pointer;
+    padding: 10px 0;
+}
+.doc-gl-check input { width: 16px; height: 16px; accent-color: var(--green-mid, #6b8f3a); cursor: pointer; }

@@ -15,14 +15,21 @@ $s->execute();
 $me = $s->get_result()->fetch_assoc();
 $s->close();
 
+// Guard: if the admin account row is somehow missing, fall back to sane
+// values instead of crashing on substr(htmlspecialchars(null)).
+if (!$me) {
+    $me = ['first_name' => 'Admin', 'last_name' => '', 'email' => '',
+           'contact' => '', 'profile_photo' => null];
+}
+
 $myName        = htmlspecialchars(($me['first_name'] ?? '') . ' ' . ($me['last_name'] ?? ''));
 $myPhoto       = !empty($me['profile_photo']) ? '../' . htmlspecialchars($me['profile_photo']) : null;
 $myInitials    = strtoupper(substr($me['first_name'] ?? 'A', 0, 1) . substr($me['last_name'] ?? '', 0, 1));
 
 $activeView    = $_GET['view'] ?? 'overview';
-// Legacy URLs may still point at the removed announcements tab — it now
-// lives inside Site Settings.
-if ($activeView === 'announcements') $activeView = 'settings';
+// Legacy URLs may still point at the removed standalone announcements tab —
+// announcements now live inside the Information section.
+if ($activeView === 'announcements') $activeView = 'information';
 
 // ── Stats ──────────────────────────────────────────────────────────
 $statStudents  = $conn->query("SELECT COUNT(*) FROM users WHERE LOWER(role)='student' AND LOWER(status)!='archived'")->fetch_row()[0];
@@ -40,6 +47,95 @@ $announcements = $conn->query(
 )->fetch_all(MYSQLI_ASSOC);
 
 $settings = site_settings();
+
+/* ══ AUDIT TRAIL (Admin → Audit Logs) ═══════════════════════════
+ * Server-rendered activity log with action/keyword/date filters
+ * and pagination. Read-only: entries are only ever written by
+ * audit_log() from the app's own flows. */
+$auditPerPage = 25;
+$auditPage    = max(1, (int)($_GET['apage'] ?? 1));
+$fAction      = trim((string)($_GET['aaction'] ?? ''));
+$fQuery       = trim((string)($_GET['aq'] ?? ''));
+$fFrom        = trim((string)($_GET['afrom'] ?? ''));
+$fTo          = trim((string)($_GET['ato'] ?? ''));
+
+$auditWhere  = [];
+$auditTypes  = '';
+$auditParams = [];
+if ($fAction !== '') {
+    $auditWhere[]  = 'al.action = ?';
+    $auditTypes   .= 's';
+    $auditParams[] = $fAction;
+}
+if ($fQuery !== '') {
+    $auditWhere[]  = '(al.actor_name LIKE ? OR al.details LIKE ? OR al.entity_id LIKE ? OR al.ip_address LIKE ?)';
+    $auditTypes   .= 'ssss';
+    $like          = '%' . $fQuery . '%';
+    array_push($auditParams, $like, $like, $like, $like);
+}
+if ($fFrom !== '') {
+    $auditWhere[]  = 'al.created_at >= ?';
+    $auditTypes   .= 's';
+    $auditParams[] = $fFrom . ' 00:00:00';
+}
+if ($fTo !== '') {
+    $auditWhere[]  = 'al.created_at <= ?';
+    $auditTypes   .= 's';
+    $auditParams[] = $fTo . ' 23:59:59';
+}
+$auditWhereSql = $auditWhere ? ('WHERE ' . implode(' AND ', $auditWhere)) : '';
+
+// Total matching rows (for pagination + heading count)
+$cnt = $conn->prepare("SELECT COUNT(*) FROM audit_logs al {$auditWhereSql}");
+if ($auditParams) {
+    $cnt->bind_param($auditTypes, ...$auditParams);
+}
+$cnt->execute();
+$auditTotal = (int)$cnt->get_result()->fetch_row()[0];
+$cnt->close();
+
+$auditPages  = max(1, (int)ceil($auditTotal / $auditPerPage));
+$auditPage   = min($auditPage, $auditPages);
+$auditOffset = ($auditPage - 1) * $auditPerPage;
+
+$sel = $conn->prepare(
+    "SELECT al.*,
+            TRIM(CONCAT(tu.first_name, ' ', tu.last_name)) AS target_user_name,
+            TRIM(CONCAT(au.first_name, ' ', au.last_name)) AS target_auth_name,
+            an.title AS target_ann_title
+     FROM audit_logs al
+     LEFT JOIN users tu ON al.entity = 'user' AND al.entity_id IS NOT NULL AND tu.student_id = al.entity_id
+     LEFT JOIN users au ON al.entity = 'auth' AND al.entity_id REGEXP '^[0-9]+$' AND au.id = al.entity_id
+     LEFT JOIN announcements an ON al.entity = 'announcement' AND al.entity_id REGEXP '^[0-9]+$' AND an.id = al.entity_id
+     {$auditWhereSql}
+     ORDER BY al.created_at DESC, al.id DESC
+     LIMIT {$auditPerPage} OFFSET {$auditOffset}"
+);
+if ($auditParams) {
+    $sel->bind_param($auditTypes, ...$auditParams);
+}
+$sel->execute();
+$auditRows = $sel->get_result()->fetch_all(MYSQLI_ASSOC);
+$sel->close();
+
+// Distinct actions for the filter dropdown (grows as new actions appear)
+$auditActions = array_column(
+    $conn->query('SELECT DISTINCT action FROM audit_logs ORDER BY action')->fetch_all(MYSQLI_ASSOC),
+    'action'
+);
+
+// Badge color: routine events green, security failures red
+if (!function_exists('audit_badge_class')) {
+    function audit_badge_class(string $action): string
+    {
+        $routine = ['LOGIN', 'LOGOUT', 'USER_CREATED', 'USER_UPDATED', 'USER_UNARCHIVED',
+                    'REQUEST_SUBMITTED', 'REQUEST_UPDATED', 'REQUEST_RESTORED', 'STATUS_CHANGED',
+                    'CERTIFICATE_RELEASED', 'PROFILE_UPDATED', 'CREDENTIAL_REQUEST_SUBMITTED',
+                    'DOCUMENT_TYPE_ADDED', 'DOCUMENT_TYPE_REMOVED',
+                    'DOCUMENT_TYPE_RESTORED', 'DOCUMENT_TYPE_DELETED'];
+        return in_array($action, $routine, true) ? 'ab-green' : 'ab-red';
+    }
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -50,6 +146,7 @@ $settings = site_settings();
     <title>Admin Dashboard — HEHMS</title>
     <link rel="stylesheet" href="../student/dashb.css">
     <link rel="stylesheet" href="admin.css">
+    <link rel="stylesheet" href="../assets/css/scroll-table.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
@@ -144,6 +241,24 @@ $settings = site_settings();
                     </div>
                 </a>
 
+                <a onclick="showView('information')" id="nav-information"
+                    class="nav-main-item <?php echo $activeView === 'information' ? 'active' : ''; ?>">
+                    <div class="nmi-icon">📢</div>
+                    <div class="nmi-text">
+                        <div class="nmi-title">Information</div>
+                        <div class="nmi-sub">Hours, contacts, announcements &amp; documents</div>
+                    </div>
+                </a>
+
+                <a onclick="showView('audit')" id="nav-audit"
+                    class="nav-main-item <?php echo $activeView === 'audit' ? 'active' : ''; ?>">
+                    <div class="nmi-icon">🧾</div>
+                    <div class="nmi-text">
+                        <div class="nmi-title">Audit Logs</div>
+                        <div class="nmi-sub">Who did what, when</div>
+                    </div>
+                </a>
+
                 <a onclick="showView('account')" id="nav-account"
                     class="nav-main-item <?php echo $activeView === 'account' ? 'active' : ''; ?>">
                     <div class="nmi-icon">👤</div>
@@ -192,7 +307,7 @@ $settings = site_settings();
                             <ul class="dashboard-list">
                                 <?php if (empty($announcements)): ?>
                                     <li>No announcements yet.</li>
-                                    <li>Create one under <strong>Announcements</strong>.</li>
+                                    <li>Create one under <strong>Information</strong>.</li>
                                 <?php else: foreach (array_slice($announcements, 0, 3) as $a): ?>
                                     <li>
                                         <strong><?php echo htmlspecialchars($a['title']); ?></strong>
@@ -206,20 +321,20 @@ $settings = site_settings();
 
                         <div class="dashboard-card">
                             <h3>🕒 Office Hours</h3>
-                            <p><?php echo site_setting('office_hours', 'Monday to Friday, 8:00 AM – 4:00 PM'); ?></p>
+                            <p><?php echo htmlspecialchars(site_setting('office_hours', 'Monday to Friday, 8:00 AM – 4:00 PM')); ?></p>
                             <p style="margin-top:10px;">Closed during weekends and holidays.</p>
                         </div>
 
                         <div class="dashboard-card full-width">
                             <h3>☎ Contact Information</h3>
                             <p><strong>Registrar's Office</strong></p>
-                            <p>Email: <?php echo site_setting('contact_email', 'registrar@hehms.edu.ph'); ?></p>
-                            <p>Phone: <?php echo site_setting('contact_phone', '(044) 123-4567'); ?></p>
-                            <p>Location: <?php echo site_setting('contact_location', 'Hilario E. Hermosa Memorial High School, Siclong, Laur, Nueva Ecija'); ?></p>
+                            <p>Email: <?php echo htmlspecialchars(site_setting('contact_email', 'registrar@hehms.edu.ph')); ?></p>
+                            <p>Phone: <?php echo htmlspecialchars(site_setting('contact_phone', '(044) 123-4567')); ?></p>
+                            <p>Location: <?php echo htmlspecialchars(site_setting('contact_location', 'Hilario E. Hermosa Memorial High School, Siclong, Laur, Nueva Ecija')); ?></p>
                         </div>
                     </div>
 
-                    <button class="save-btn" type="button" onclick="showView('settings')">📢 New Announcement</button>
+                    <button class="save-btn" type="button" onclick="showView('information')">📢 New Announcement</button>
                 </div>
             </div>
 
@@ -253,7 +368,8 @@ $settings = site_settings();
                         </div>
                     </div>
 
-                    <table class="tbl-header-table">
+                    <div class="tbl-scroll-wrap">
+                        <table class="tbl-x" style="min-width: 1050px;">
                         <thead>
                             <tr>
                                 <th>ID</th>
@@ -276,9 +392,6 @@ $settings = site_settings();
                                 <th>Actions</th>
                             </tr>
                         </thead>
-                    </table>
-                    <div class="table-scroll-body">
-                        <table>
                             <tbody id="records-tbody">
                                 <tr><td colspan="7">
                                     <div class="empty-state"><div class="empty-icon">⏳</div><p>Loading accounts…</p></div>
@@ -289,13 +402,13 @@ $settings = site_settings();
                 </div>
             </div>
 
-            <!-- ════ VIEW 4: SITE SETTINGS (branding + info + announcements) ════ -->
+            <!-- ════ VIEW 4: SITE SETTINGS (branding: logo + theme) ════ -->
             <div id="view-settings" style="display:<?php echo $activeView === 'settings' ? 'block' : 'none'; ?>;">
                 <div class="page-banner">
                     <div class="page-banner-icon">🎨</div>
                     <div class="page-banner-content">
                         <h1>Site <span>Settings</span></h1>
-                        <p>Manage the school branding, contact information, and announcements.</p>
+                        <p>Manage the school branding — logo, design theme, and theme color.</p>
                     </div>
                 </div>
 
@@ -313,6 +426,7 @@ $settings = site_settings();
                         </div>
                     </div>
                 </div>
+                <br>
 
                 <div class="account-card">
                     <h3>🖼️ Design Theme</h3>
@@ -334,7 +448,7 @@ $settings = site_settings();
                     </div>
                     <p class="settings-hint" style="margin-top:10px;">ℹ️ Classic Academy uses the custom Theme Color picker below; other themes use their own palette.</p>
                 </div>
-
+<br>
                 <div class="account-card">
                     <h3>🎨 Theme Color</h3>
                     <p class="settings-hint">Applied to headers, buttons, banners, and highlights on all pages.</p>
@@ -350,7 +464,21 @@ $settings = site_settings();
                         </div>
                     </div>
                 </div>
+<br>
+                <button type="button" class="save-btn" id="btn-save-settings">💾 Save Settings</button>
+            </div>
 
+            <!-- ════ VIEW 5: INFORMATION (hours, contacts, announcements, documents) ════ -->
+            <div id="view-information" style="display:<?php echo $activeView === 'information' ? 'block' : 'none'; ?>;">
+                <div class="page-banner">
+                    <div class="page-banner-icon">📢</div>
+                    <div class="page-banner-content">
+                        <h1>Information <span>&amp; Content</span></h1>
+                        <p>Office hours, contact details, announcements, and requestable documents.</p>
+                    </div>
+                </div>
+
+                <!-- ═══ Office hours & contact ═══ -->
                 <div class="account-card">
                     <h3>🕒 Office Hours &amp; Contact Information</h3>
                     <p class="settings-hint">Shown on the login page and every dashboard (Office Hours &amp; Contact cards).</p>
@@ -377,9 +505,8 @@ $settings = site_settings();
                                 value="<?php echo htmlspecialchars(site_setting('contact_location', 'Hilario E. Hermosa Memorial High School, Siclong, Laur, Nueva Ecija')); ?>">
                         </div>
                     </div>
+                    <button type="button" class="save-btn" id="btn-save-info">💾 Save Information</button>
                 </div>
-
-                <button type="button" class="save-btn" id="btn-save-settings">💾 Save Settings</button>
 
                 <!-- ═══ Announcements (managed here) ═══ -->
                 <div class="account-card" style="margin-top:28px;">
@@ -396,7 +523,7 @@ $settings = site_settings();
                     </div>
                     <button type="button" class="save-btn" id="btn-add-announcement">💾 Publish Announcement</button>
                 </div>
-
+<br>
                 <div class="account-card">
                     <h3>📋 All Announcements</h3>
                     <div id="ann-list">
@@ -430,9 +557,40 @@ $settings = site_settings();
                         <?php endforeach; endif; ?>
                     </div>
                 </div>
+
+                <!-- ═══ Requestable documents (add / remove) ═══ -->
+                <div class="account-card" style="margin-top:28px;">
+                    <h3>📄 Requestable Documents</h3>
+                    <p class="settings-hint">
+                        Documents students can choose when submitting a request. <strong>Remove</strong> hides a
+                        document from the request form — existing requests keep it in their history. Types that
+                        were never requested can be deleted permanently.
+                    </p>
+
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label for="doc-type-name">New Document Name <span class="req-star">*</span></label>
+                            <input type="text" id="doc-type-name" maxlength="150"
+                                placeholder="e.g. Certificate of Honorable Dismissal">
+                            <span class="field-error" id="err-doc-type"></span>
+                        </div>
+                        <div class="form-group">
+                            <label>Grade Level</label>
+                            <label class="doc-gl-check">
+                                <input type="checkbox" id="doc-type-gl">
+                                Ask for the Grade Level on the request form
+                            </label>
+                        </div>
+                    </div>
+                    <button type="button" class="save-btn" id="btn-add-doc-type">➕ Add Document</button>
+
+                    <div id="doc-type-list">
+                        <p class="empty-state">Loading…</p>
+                    </div>
+                </div>
             </div>
 
-            <!-- ════ VIEW 5: ACCOUNT INFORMATION ════ -->
+            <!-- ════ VIEW 6: ACCOUNT INFORMATION ════ -->
             <div id="view-account" style="display:<?php echo $activeView === 'account' ? 'block' : 'none'; ?>;">
                 <div class="page-banner">
                     <div class="page-banner-icon">👤</div>
@@ -477,12 +635,125 @@ $settings = site_settings();
                                 value="<?php echo htmlspecialchars($me['contact'] ?? ''); ?>" placeholder="09XXXXXXXXX">
                         </div>
                         <div class="form-group full">
+                            <label>Current Password <span class="hint-inline">(required when changing password)</span></label>
+                            <input type="password" id="acc-current-password" autocomplete="current-password">
+                        </div>
+                        <div class="form-group full">
                             <label>New Password <span class="hint-inline">(leave blank to keep current)</span></label>
                             <input type="password" id="acc-password" placeholder="••••••••" autocomplete="new-password">
                         </div>
                     </div>
 
                     <button type="button" class="save-btn" id="btn-save-account">💾 Save Changes</button>
+                </div>
+            </div>
+
+            <!-- ════ VIEW 7: AUDIT LOGS ════ -->
+            <div id="view-audit" style="display:<?php echo $activeView === 'audit' ? 'block' : 'none'; ?>;">
+                <div class="page-banner">
+                    <div class="page-banner-icon">🧾</div>
+                    <div class="page-banner-content">
+                        <h1>Audit <span>Logs</span></h1>
+                        <p>Every login, request, release, and account change — recorded automatically.</p>
+                    </div>
+                </div>
+
+                <div class="container audit-wrap">
+                    <div class="table-header">
+                        <h3>Activity Trail · <?php echo number_format($auditTotal); ?> event<?php echo $auditTotal === 1 ? '' : 's'; ?></h3>
+                    </div>
+
+                    <form method="GET" action="adminDashboard.php" class="audit-filters">
+                        <input type="hidden" name="view" value="audit">
+                        <select name="aaction">
+                            <option value="">All actions</option>
+                            <?php foreach ($auditActions as $a): ?>
+                                <option value="<?php echo htmlspecialchars($a); ?>"<?php echo $a === $fAction ? ' selected' : ''; ?>>
+                                    <?php echo htmlspecialchars(str_replace('_', ' ', $a)); ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                        <input type="text" name="aq" placeholder="Search name / details / IP…" value="<?php echo htmlspecialchars($fQuery); ?>">
+                        <input type="date" name="afrom" value="<?php echo htmlspecialchars($fFrom); ?>" title="From date">
+                        <input type="date" name="ato" value="<?php echo htmlspecialchars($fTo); ?>" title="To date">
+                        <button type="submit" class="btn-new-request">Filter</button>
+                        <a href="adminDashboard.php?view=audit" class="audit-clear">Clear</a>
+                    </form>
+
+                    <div class="audit-table-scroll">
+                        <table class="audit-table">
+                            <thead>
+                                <tr>
+                                    <th>Date &amp; Time</th>
+                                    <th>Actor</th>
+                                    <th>Action</th>
+                                    <th>Target</th>
+                                    <th>Details</th>
+                                    <th>IP Address</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php if (!$auditRows): ?>
+                                    <tr><td colspan="6">
+                                        <div class="empty-state"><div class="empty-icon">🗂️</div><p>No events match the current filters.</p></div>
+                                    </td></tr>
+                                <?php else: foreach ($auditRows as $r):
+                                    $target    = '—';
+                                    $targetSub = '';
+                                    if ($r['entity'] === 'document_request' && $r['entity_id']) {
+                                        $target = $r['entity_id'];               // REQ-0007
+                                    } elseif ($r['entity'] === 'user' && !empty($r['target_user_name'])) {
+                                        $target    = $r['target_user_name'];     // Willmer Cayadong
+                                        $targetSub = $r['entity_id'];             // 2026-0001 (small, under the name)
+                                    } elseif ($r['entity'] === 'auth' && !empty($r['target_auth_name'])) {
+                                        $target = $r['target_auth_name'];         // affected account's name
+                                    } elseif ($r['entity'] === 'announcement' && !empty($r['target_ann_title'])) {
+                                        $target    = $r['target_ann_title'];       // the announcement's TITLE
+                                        $targetSub = 'announcement #' . $r['entity_id'];
+                                    } elseif ($r['entity'] === 'settings') {
+                                        $target = 'Site Settings';                 // no row to resolve — label it
+                                    } elseif ($r['entity'] === 'announcement') {
+                                        $target = 'Announcement #' . $r['entity_id'];   // deleted — title is in Details
+                                    } elseif ($r['entity_id'] !== null && $r['entity_id'] !== '') {
+                                        $target = $r['entity_id'];
+                                    }
+                                ?>
+                                    <tr>
+                                        <td class="audit-when"><?php echo date('M d, Y g:i A', strtotime($r['created_at'])); ?></td>
+                                        <td>
+                                            <strong><?php echo htmlspecialchars($r['actor_name'] ?: 'Unknown'); ?></strong>
+                                            <?php if ($r['actor_role']): ?>
+                                                <div class="audit-role"><?php echo htmlspecialchars(ucfirst(strtolower($r['actor_role']))); ?></div>
+                                            <?php endif; ?>
+                                        </td>
+                                        <td><span class="audit-badge <?php echo audit_badge_class($r['action']); ?>"><?php echo htmlspecialchars(str_replace('_', ' ', $r['action'])); ?></span></td>
+                                        <td class="audit-target"><?php echo htmlspecialchars($target); ?><?php if ($targetSub !== ''): ?><div class="audit-role"><?php echo htmlspecialchars($targetSub); ?></div><?php endif; ?></td>
+                                        <td class="audit-details"><?php echo htmlspecialchars($r['details'] ?? ''); ?></td>
+                                        <td class="audit-ip"><?php echo htmlspecialchars($r['ip_address'] ?? ''); ?></td>
+                                    </tr>
+                                <?php endforeach; endif; ?>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <?php if ($auditPages > 1):
+                        $qs = static function (int $p) use ($fAction, $fQuery, $fFrom, $fTo): string {
+                            return 'adminDashboard.php?view=audit&apage=' . $p
+                                . ($fAction !== '' ? '&aaction=' . urlencode($fAction) : '')
+                                . ($fQuery !== '' ? '&aq=' . urlencode($fQuery) : '')
+                                . ($fFrom !== '' ? '&afrom=' . urlencode($fFrom) : '')
+                                . ($fTo !== '' ? '&ato=' . urlencode($fTo) : '');
+                        }; ?>
+                        <div class="audit-pager">
+                            <?php if ($auditPage > 1): ?>
+                                <a href="<?php echo $qs($auditPage - 1); ?>">&laquo; Newer</a>
+                            <?php endif; ?>
+                            <span>Page <?php echo $auditPage; ?> of <?php echo $auditPages; ?></span>
+                            <?php if ($auditPage < $auditPages): ?>
+                                <a href="<?php echo $qs($auditPage + 1); ?>">Older &raquo;</a>
+                            <?php endif; ?>
+                        </div>
+                    <?php endif; ?>
                 </div>
             </div>
 
@@ -545,43 +816,6 @@ $settings = site_settings();
                         <label for="f-lrn">LRN <span class="hint-inline">(Learner Reference Number)</span></label>
                         <input type="text" id="f-lrn" placeholder="12-digit LRN" maxlength="12">
                         <span class="field-error" id="err-lrn"></span>
-                    </div>
-                    <div class="form-group">
-                        <label for="f-dob">Date of Birth</label>
-                        <input type="date" id="f-dob">
-                        <span class="field-error" id="err-dob"></span>
-                    </div>
-                    <div class="form-group" id="group-grade">
-                        <label for="f-grade">Grade Level</label>
-                        <select id="f-grade">
-                            <option value="">— Select Grade —</option>
-                            <option value="Grade 7">Grade 7</option>
-                            <option value="Grade 8">Grade 8</option>
-                            <option value="Grade 9">Grade 9</option>
-                            <option value="Grade 10">Grade 10</option>
-                            <option value="Grade 11">Grade 11</option>
-                            <option value="Grade 12">Grade 12</option>
-                        </select>
-                        <span class="field-error" id="err-grade"></span>
-                    </div>
-                    <div class="form-group" id="group-strand">
-                        <label for="f-strand">Strand / Track <span class="hint-inline">(for Grade 11–12)</span></label>
-                        <select id="f-strand">
-                            <option value="">— Not Applicable —</option>
-                            <option value="ABM">ABM – Accountancy, Business &amp; Management</option>
-                            <option value="HUMSS">HUMSS – Humanities &amp; Social Sciences</option>
-                            <option value="STEM">STEM – Science, Technology, Engineering &amp; Math</option>
-                            <option value="GAS">GAS – General Academic Strand</option>
-                            <option value="TVL">TVL – Technical-Vocational-Livelihood</option>
-                            <option value="Sports">Sports Track</option>
-                            <option value="Arts">Arts &amp; Design Track</option>
-                        </select>
-                        <span class="field-error" id="err-strand"></span>
-                    </div>
-                    <div class="form-group full">
-                        <label for="f-syear">School Year Last Attended</label>
-                        <input type="text" id="f-syear" placeholder="2024–2025" maxlength="20">
-                        <span class="field-error" id="err-syear"></span>
                     </div>
                 </div>
 

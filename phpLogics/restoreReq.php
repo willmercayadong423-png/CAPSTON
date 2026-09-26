@@ -1,6 +1,7 @@
 <?php
 require("auth.php");
 require_once __DIR__ . '/mailer.php';
+require_once __DIR__ . '/audit.php';
 
 // Students only
 if (strtolower($_SESSION['role']) !== 'student') {
@@ -27,8 +28,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'
     $chk->close();
 
     if ($pending >= 3) {
-        header("Location: ../student/dashboard.php?error=not_found");
+        header("Location: ../student/dashboard.php?error=pending_limit");
         exit();
+    }
+
+    // ── Guard: restoring must not create a second pending request of the
+    // same document type (the new-request flow enforces the same rule). ──
+    $dup = $conn->prepare(
+        "SELECT document_type FROM document_requests WHERE id = ? AND user_id = ?"
+    );
+    $dup->bind_param("ii", $req_id, $student_id);
+    $dup->execute();
+    $docType = (string)($dup->get_result()->fetch_assoc()['document_type'] ?? '');
+    $dup->close();
+
+    if ($docType !== '') {
+        $dup2 = $conn->prepare(
+            "SELECT COUNT(*) AS cnt FROM document_requests
+             WHERE user_id = ? AND document_type = ? AND status = 'Pending' AND id != ?"
+        );
+        $dup2->bind_param("isi", $student_id, $docType, $req_id);
+        $dup2->execute();
+        $dupCnt = (int)$dup2->get_result()->fetch_assoc()['cnt'];
+        $dup2->close();
+
+        if ($dupCnt > 0) {
+            header("Location: ../student/dashboard.php?error=dup_pending");
+            exit();
+        }
     }
 
     // ── Details for the registrar notification (fetched before the update) ──
@@ -49,7 +76,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'
     // cancelled_by / date_released are cleared so the row is clean again.
     $restore = $conn->prepare(
         "UPDATE document_requests
-         SET status = 'Pending', cancelled_by = NULL, date_released = NULL
+         SET status = 'Pending', cancelled_by = NULL, rejection_reason = NULL, date_released = NULL
          WHERE id = ? AND user_id = ? AND status = 'Cancelled'
            AND (cancelled_by = 'student' OR cancelled_by IS NULL OR cancelled_by = '')"
     );
@@ -57,6 +84,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'
     $restore->execute();
     $restored = $restore->affected_rows > 0;
     $restore->close();
+
+    // ── Audit: student put a cancelled request back in the queue ──
+    if ($restored) {
+        audit_log($conn, 'REQUEST_RESTORED', 'document_request',
+            'REQ-' . str_pad((string) $req_id, 4, '0', STR_PAD_LEFT),
+            'Cancelled request restored to Pending by student');
+    }
 
     // ── Tell the registrar the request is back in their Pending queue ──
     if ($restored && $info) {

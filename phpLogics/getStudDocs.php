@@ -2,6 +2,7 @@
 require("auth.php");
 include("../database/db.php");
 
+// ── Admin only ───────────────────────────────────────────────────────
 if (strtolower($_SESSION['role']) !== 'admin') {
     echo json_encode(['error' => 'Unauthorized']); exit();
 }
@@ -20,15 +21,12 @@ $stmt->execute();
 $result = $stmt->get_result();
 
 $counts = [
-    'certificate_of_registration'          => 0,
     'certificate_of_enrollment'            => 0,
     'certificate_of_grades'                => 0,
     'certificate_of_good_moral'            => 0,
     'certificate_of_transfer'             => 0,
     'certificate_of_completion_graduation' => 0,
-    'sf10_form_137'                        => 0,
-    'diploma'                              => 0,
-    'yearbook'                             => 0,
+    // Types added by the admin (or retired legacy names) fall into 'other'.
     'other'                                => 0,
 ];
 

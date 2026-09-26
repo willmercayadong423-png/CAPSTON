@@ -1,5 +1,9 @@
 <?php
 require_once __DIR__ . '/auth.php'; // starts session with correct cookie params
+require_once __DIR__ . '/audit.php';
+
+// ── Audit: record the logout while the session still exists ──
+audit_log($conn, 'LOGOUT', 'auth', (string)($_SESSION['user_id'] ?? ''), 'User logged out');
 
 session_unset();
 session_destroy();

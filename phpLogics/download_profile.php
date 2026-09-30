@@ -9,7 +9,7 @@ if (strtolower($_SESSION['role']) !== 'student') {
 
 $student_id = $_SESSION['user_id'];
 $field      = $_GET['field'] ?? '';
-$allowed    = ['id_front', 'id_back', 'profile_photo'];
+$allowed    = ['profile_photo'];
 
 if (!in_array($field, $allowed, true)) {
     http_response_code(400);

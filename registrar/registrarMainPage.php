@@ -168,9 +168,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_status'])) {
     $req_id    = (int)$_POST['req_id'];
     $newStatus = $_POST['new_status'];
     // Simplified flow: Pending → Processing → Released, plus Cancelled (reject).
-    // Legacy values ("Ready for Pickup", "Unclaimed") stay accepted so old
-    // rows can still be re-saved without silently failing.
-    $allowed   = ['Pending', 'Processing', 'Ready for Pickup', 'Released', 'Unclaimed', 'Cancelled'];
+    // ("Ready for Pickup" stays accepted so legacy rows can still be
+    // re-saved without silently failing.)
+    $allowed   = ['Pending', 'Processing', 'Ready for Pickup', 'Released', 'Cancelled'];
 
     if (in_array($newStatus, $allowed, true)) {
         $dbStatus    = $newStatus;
@@ -183,11 +183,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_status'])) {
         $oldStatus = (string)($old->get_result()->fetch_row()[0] ?? '?');
         $old->close();
 
-        if ($newStatus === 'Unclaimed') {
-            // Store as Cancelled with cancelled_by = 'unclaimed'
-            $dbStatus    = 'Cancelled';
-            $cancelledBy = 'unclaimed';
-        } elseif ($newStatus === 'Cancelled') {
+        if ($newStatus === 'Cancelled') {
             // Registrar rejection — flagged so students cannot restore it.
             // A written reason is REQUIRED so the student knows why.
             $cancelledBy  = 'registrar';
@@ -300,7 +296,7 @@ $mainRows = $conn->query(
 )->fetch_all(MYSQLI_ASSOC);
 
 // ── Fetch archived rows ───────────────────────────────────────────
-// Released + ALL cancelled rows (registrar-rejected, unclaimed, and
+// Released + ALL cancelled rows (registrar-rejected and
 // student-cancelled) — the registrar always sees the full picture.
 $archivedRows = $conn->query(
     "SELECT dr.*, CONCAT(s.first_name,' ',s.last_name) AS student_name, s.profile_photo
@@ -332,7 +328,6 @@ function statusBadge($status, $cancelledBy = '')
     if ($status === 'Cancelled') {
         return match ($cancelledBy) {
             'registrar' => "<span class=\"status rejected\">Rejected</span>",
-            'unclaimed' => "<span class=\"status unclaimed\">Unclaimed</span>",
             default     => "<span class=\"status cancelled\">Cancelled</span>",   // by student
         };
     }
@@ -406,7 +401,6 @@ function renderRow($r, $isArchived = false)
         if ($r['status'] === 'Cancelled') {
             $archStatus = match ($cancelledBy) {
                 'registrar' => 'Rejected',
-                'unclaimed' => 'Unclaimed',
                 default     => 'Cancelled',   // cancelled by the student
             };
         }

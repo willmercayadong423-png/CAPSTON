@@ -79,7 +79,6 @@ while ($row = $res->fetch_assoc()) {
     if ($row['status'] === 'Cancelled') {
         $row['status_label'] = match ($row['cancelled_by'] ?? '') {
             'registrar' => 'Rejected',
-            'unclaimed' => 'Unclaimed',
             default     => 'Cancelled',
         };
     } else {

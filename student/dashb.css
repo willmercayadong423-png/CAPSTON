@@ -566,7 +566,6 @@
     .badge.processing { background: #dbeafe; color: #1e3a8a; }
     .badge.pending    { background: #fef3c7; color: #78350f; }
     .badge.released   { background: #f0fdf4; color: #166534; border: 1px solid #bbf7d0; }
-    .badge.unclaimed  { background: #f3e8ff; color: #5b21b6; }
 
     .badge-rejected {
         display: inline-block; padding: 2px 8px;
@@ -1114,12 +1113,6 @@
         border: 1px solid #fecaca;
     }
 
-    .status.unclaimed {
-        background: #f3e8ff;
-        color: #5b21b6;
-        border: 1px solid #e9d5ff;
-    }
-
     /* Page Banner */
     .page-banner{
         display:flex;
@@ -1329,9 +1322,19 @@ box-shadow:0 6px 18px rgba(0,0,0,.06);
     grid-column:1/-1;
 }
 
-/* ══ Dashboard cards fix for 5 stat cards ══ */
+/* ══ Dashboard cards ══
+   Default: auto-fit (admin overview's 4 cards).
+   .cards-3 (student dashboard): fixed 3-per-row grid — the 6 status
+   cards line up in a neat 3 × 2 grid. Falls back to 2 per row on
+   small screens (see the media queries below). */
 .cards {
     grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+.cards.cards-3 {
+    grid-template-columns: repeat(3, 1fr);
+}
+@media (max-width: 768px) {
+    .cards.cards-3 { grid-template-columns: repeat(2, 1fr); }
 }
 
 /* ══ Dashboard welcome / info cards ══ */
@@ -1918,8 +1921,13 @@ input.locked-field:focus {
 }
 .btn-dl-cert:hover { background: #dcfce7; }
 
-/* Student-cancelled badge (its own look, no longer shares "unclaimed") */
+/* Student-cancelled badge (its own look, no longer shares "rejected") */
 .badge.cancelled { background: #f3f4f6; color: #4b5563; border: 1px solid #e5e7eb; }
+
+/* Registrar-rejected badge — same red look as the registrar dashboard's
+   .status.rejected, so the status reads "Rejected" (not "Cancelled") on
+   both sides */
+.badge.rejected { background: #fee2e2; color: #b91c1c; border: 1px solid #fecaca; }
 
 /* ══════════════════════════════════════════════════════════
    SIDEBAR HIGHLIGHT PASS — makes the sidebar clearly visible

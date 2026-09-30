@@ -396,9 +396,6 @@ function statusBadgeHtml(status, cancelledBy) {
         if (cancelledBy === 'registrar') {
             return '<span class="status rejected">Rejected</span>';
         }
-        if (cancelledBy === 'unclaimed') {
-            return '<span class="status unclaimed">Unclaimed</span>';
-        }
         return '<span class="status cancelled">Cancelled</span>';   // by student
     }
     var cls = {

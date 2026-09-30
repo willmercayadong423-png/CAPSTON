@@ -139,11 +139,10 @@ function applyRowFilter(scope) {
 
         var matchQ = !q || row.textContent.toLowerCase().indexOf(q) !== -1;
         var st     = row.getAttribute('data-status');
-        // "Cancelled" chip matches the whole cancelled family
-        // (student-cancelled + registrar-rejected + unclaimed),
-        // mirroring the dashboard card's count.
-        var matchF = !f || st === f ||
-                     (f === 'Cancelled' && row.getAttribute('data-cancelled') === '1');
+        // Exact status match — history rows carry the RESOLVED label
+        // ("Rejected" / "Cancelled"), the same behaviour
+        // as the registrar dashboard's chips.
+        var matchF = !f || st === f;
 
         var show = matchQ && matchF;
         row.style.display = show ? '' : 'none';

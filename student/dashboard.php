@@ -24,7 +24,7 @@ $student_id = $_SESSION['user_id'];
 
 // ── Path anchors ──────────────────────────────────────────────────
 // This page lives in /student, but uploads/ sits at the project root and
-// the DB stores web-root-relative paths (e.g. "uploads/id_photos/x.png").
+// the DB stores web-root-relative paths (e.g. "uploads/profile_photos/x.png").
 // So: use $uploads_fs for filesystem calls, $uploads_web for anything
 // stored in the DB or rendered into an href/src.
 $uploads_fs  = dirname(__DIR__) . '/uploads';
@@ -139,48 +139,6 @@ if (isset($_FILES['profile_photo']) && $_FILES['profile_photo']['error'] === UPL
 
 
 
-// ── NEW: ID photo front/back (optional replacement) ────────────────
-$allowed_img_types = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
-$allowed_img_ext   = ['jpg', 'jpeg', 'png', 'gif', 'webp'];
-$id_fs_dir         = $uploads_fs . '/id_photos/';
-if (!is_dir($id_fs_dir)) mkdir($id_fs_dir, 0755, true);
-
-$new_id_front = $student['id_front'] ?? null;
-$new_id_back  = $student['id_back']  ?? null;
-
-foreach (['id_front' => &$new_id_front, 'id_back' => &$new_id_back] as $field => &$target) {
-    if (isset($_FILES[$field]) && $_FILES[$field]['error'] === UPLOAD_ERR_OK) {
-        $file = $_FILES[$field];
-        $ext  = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
-        $mime = mime_content_type($file['tmp_name']);
-
-        if (!in_array($ext, $allowed_img_ext, true)) {
-            $updateError = ucfirst(str_replace('_', ' ', $field)) . ": file extension not allowed.";
-        } elseif (!in_array($mime, $allowed_img_types)) {
-            $updateError = ucfirst(str_replace('_', ' ', $field)) . ": must be JPG, PNG, GIF, or WEBP.";
-        } elseif ($file['size'] > 3 * 1024 * 1024) {
-            $updateError = ucfirst(str_replace('_', ' ', $field)) . ": file exceeds 3 MB limit.";
-        } else {
-            $filename = $field . '_' . $student_id . '_' . time() . '_' . rand(100, 999) . '.' . $ext;
-            if (move_uploaded_file($file['tmp_name'], $id_fs_dir . $filename)) {
-                if (!empty($target)) {
-                    $old = $uploads_fs . '/' . ltrim($target, '/');
-                    if (file_exists($old)) unlink($old);
-                }
-                $target = $uploads_web . '/id_photos/' . $filename;
-            } else {
-                $updateError = ucfirst(str_replace('_', ' ', $field)) . ": failed to save. Please try again.";
-            }
-        }
-    }
-}
-unset($target);
-
-
-
-
-
-
             if (empty($updateError)) {
     $new_lrn        = trim($_POST['lrn'] ?? '');
     $new_first_name = trim($_POST['first_name'] ?? '');
@@ -224,15 +182,15 @@ unset($target);
 
 if (empty($updateError)) {
     $upd = $conn->prepare("UPDATE users
-        SET email=?, contact=?, profile_photo=?, id_front=?, id_back=?,
+        SET email=?, contact=?, profile_photo=?,
             lrn=?, first_name=?, last_name=?
         WHERE id=?");
-   $upd->bind_param(
-    "ssssssssi",
-    $new_email, $new_contact, $new_photo, $new_id_front, $new_id_back,
-    $new_lrn, $new_first_name, $new_last_name,
-    $student_id
-);
+    $upd->bind_param(
+        "ssssssi",
+        $new_email, $new_contact, $new_photo,
+        $new_lrn, $new_first_name, $new_last_name,
+        $student_id
+    );
                 if ($upd->execute()) {
                     // ── Apply the optional password change ──
                     if ($changePw && $newPass !== '') {
@@ -487,19 +445,23 @@ $cntTotal   = count($myRequests);
 $cntPending = 0;
 $cntReleased = 0;
 $cntProcessing = 0;
-$cntCancelled = 0;
+$cntCancelled = 0;   // cancelled BY THE STUDENT
+$cntRejected  = 0;   // cancelled BY THE REGISTRAR — shown as "Rejected",
+                     // matching the registrar dashboard's own Rejected count
 foreach ($myRequests as $r) {
     if ($r['status'] === 'Pending')          $cntPending++;
     if ($r['status'] === 'Released')         $cntReleased++;
     if ($r['status'] === 'Processing')       $cntProcessing++;
-    if ($r['status'] === 'Cancelled')        $cntCancelled++;
+    if ($r['status'] === 'Cancelled') {
+        if (trim($r['cancelled_by'] ?? '') === 'registrar') $cntRejected++;
+        else                                               $cntCancelled++;
+    }
 }
 
 function badgeClass($status, $cancelledBy = '')
 {
     if ($status === 'Cancelled') {
         if ($cancelledBy === 'registrar') return 'rejected';
-        if ($cancelledBy === 'unclaimed') return 'unclaimed';
         return 'cancelled';   // cancelled by the student
     }
     return match ($status) {
@@ -697,7 +659,7 @@ $avatarInitials = strtoupper(substr($student['first_name'], 0, 1) . substr($stud
 <div class="dashboard-card">
     <h2 class="card-title">You can request school documents, monitor your request status, and stay updated with school announcements.</h2>
     <Br>
-    <div class="cards">
+    <div class="cards cards-3">
         <div class="card card-click" data-goto="" data-view="main" title="Show all of my requests">
             <span class="card-icon">📋</span><h4>Total Requests</h4><h2><?php echo $cntTotal; ?></h2>
         </div>
@@ -709,6 +671,9 @@ $avatarInitials = strtoupper(substr($student['first_name'], 0, 1) . substr($stud
         </div>
         <div class="card card-click" data-goto="Released" data-view="archived" title="Show my released requests">
             <span class="card-icon">✅</span><h4>Released</h4><h2><?php echo $cntReleased; ?></h2>
+        </div>
+        <div class="card card-click" data-goto="Rejected" data-view="archived" title="Show requests rejected by the registrar">
+            <span class="card-icon">🚫</span><h4>Rejected</h4><h2><?php echo $cntRejected; ?></h2>
         </div>
         <div class="card card-click" data-goto="Cancelled" data-view="archived" title="Show my cancelled requests">
             <span class="card-icon">❌</span><h4>Cancelled</h4><h2><?php echo $cntCancelled; ?></h2>
@@ -890,6 +855,7 @@ $avatarInitials = strtoupper(substr($student['first_name'], 0, 1) . substr($stud
                     <div class="filter-chips" id="chips-archived">
                         <button type="button" class="chip active" data-filter="">All</button>
                         <button type="button" class="chip" data-filter="Released">✔ Released</button>
+                        <button type="button" class="chip" data-filter="Rejected">🚫 Rejected</button>
                         <button type="button" class="chip" data-filter="Cancelled">✖ Cancelled</button>
                     </div>
                     <div class="tbl-scroll-wrap">
@@ -923,7 +889,6 @@ $avatarInitials = strtoupper(substr($student['first_name'], 0, 1) . substr($stud
 
                                         // Determine the exact cancellation type
                                         $byRegistrar = ($r['status'] === 'Cancelled' && $cancelledBy === 'registrar');
-                                        $byUnclaimed = ($r['status'] === 'Cancelled' && $cancelledBy === 'unclaimed');
                                         $byStudent   = ($r['status'] === 'Cancelled' && ($cancelledBy === 'student' || $cancelledBy === ''));
 
                                         // Only student-cancelled requests can be restored
@@ -932,7 +897,6 @@ $avatarInitials = strtoupper(substr($student['first_name'], 0, 1) . substr($stud
                                         // Label to display in the Status column
                                         $statusLabel = $r['status'];
                                         if ($byRegistrar) $statusLabel = 'Rejected';
-                                        if ($byUnclaimed) $statusLabel = 'Unclaimed';
                                         if ($byStudent)   $statusLabel = 'Cancelled';
                                     ?>
                                         <tr data-status="<?php echo htmlspecialchars($statusLabel); ?>"<?php echo $r['status'] === 'Cancelled' ? ' data-cancelled="1"' : ''; ?>>
@@ -947,8 +911,6 @@ $avatarInitials = strtoupper(substr($student['first_name'], 0, 1) . substr($stud
                                                     <?php if (!empty($r['rejection_reason'])): ?>
                                                         <div class="reject-reason" title="Registrar's reason">💬 <?php echo htmlspecialchars($r['rejection_reason']); ?></div>
                                                     <?php endif; ?>
-                                                <?php elseif ($byUnclaimed): ?>
-                                                    <span class="badge-unclaimed">Not picked up</span>
                                                 <?php endif; ?>
                                             </td>
                                             <td>
@@ -965,8 +927,6 @@ $avatarInitials = strtoupper(substr($student['first_name'], 0, 1) . substr($stud
                                                     </form>
                                                 <?php elseif ($byRegistrar): ?>
                                                     <span class="btn-rejected">🚫 Rejected</span>
-                                                <?php elseif ($byUnclaimed): ?>
-                                                    <span class="btn-unclaimed">📦 Unclaimed</span>
                                                 <?php else: ?>
                                                     <span class="btn-closed">✔ Closed</span>
                                                 <?php endif; ?>
@@ -1024,14 +984,7 @@ $avatarInitials = strtoupper(substr($student['first_name'], 0, 1) . substr($stud
 
     <hr>
 
-    <p>
-        <strong>📢 Reminder:</strong><br>
-        If your parent, guardian, or an authorized representative will claim your requested document, please prepare the following:
-    </p>
-    <ul class="note-list">
-        <li>Valid ID of the student (photocopy or scanned copy, if required).</li>
-        <li>Valid ID of the authorized representative.</li>
-    </ul>
+
 </div>
 
           <div class="document-grid">
@@ -1219,37 +1172,8 @@ $avatarInitials = strtoupper(substr($student['first_name'], 0, 1) . substr($stud
 
             </div>
 
-            <!-- ═══════════════════ SCHOOL ID PHOTOS (optional replacement) ═══════════════════ -->
-            <div class="account-divider"></div>
-            <div class="form-section-label">🪪 School ID Photos
-                <span class="hint-inline">(optional — upload to replace · JPG/PNG/GIF/WEBP · max 3 MB)</span>
-            </div>
-            <div class="acct-form-grid">
-                <div class="acct-form-group">
-                    <label>ID Photo — Front</label>
-                    <input type="file" name="id_front" id="id-front-input"
-                        accept="image/jpeg,image/png,image/gif,image/webp">
-                    <?php if (!empty($student['id_front'])): ?>
-                        <span class="upload-hint">
-                            Current: <a href="../phpLogics/download_profile.php?field=id_front" target="_blank">view file</a>
-                        </span>
-                    <?php endif; ?>
-                </div>
-                <div class="acct-form-group">
-                    <label>ID Photo — Back</label>
-                    <input type="file" name="id_back" id="id-back-input"
-                        accept="image/jpeg,image/png,image/gif,image/webp">
-                    <?php if (!empty($student['id_back'])): ?>
-                        <span class="upload-hint">
-                            Current: <a href="../phpLogics/download_profile.php?field=id_back" target="_blank">view file</a>
-                        </span>
-                    <?php endif; ?>
-                </div>
-            </div>
-
-            
-
             <!-- ═══════════════════ CONTACT INFORMATION ═══════════════════ -->
+            <div class="account-divider"></div>
             <div class="form-section-label">Contact Information</div>
             <div class="acct-form-grid">
                 <div class="acct-form-group full">

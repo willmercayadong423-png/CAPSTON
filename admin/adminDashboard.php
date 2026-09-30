@@ -34,7 +34,6 @@ if ($activeView === 'announcements') $activeView = 'information';
 // ── Stats ──────────────────────────────────────────────────────────
 $statStudents  = $conn->query("SELECT COUNT(*) FROM users WHERE LOWER(role)='student' AND LOWER(status)!='archived'")->fetch_row()[0];
 $statStaff     = $conn->query("SELECT COUNT(*) FROM users WHERE LOWER(role) IN ('registrar','admin') AND LOWER(status)!='archived'")->fetch_row()[0];
-$statPending   = $conn->query("SELECT COUNT(*) FROM document_requests WHERE status='Pending'")->fetch_row()[0];
 $statAnn       = $conn->query("SELECT COUNT(*) FROM announcements WHERE is_active=1")->fetch_row()[0];
 
 // ── Announcements ─────────────────────────────────────────────────
@@ -297,7 +296,6 @@ if (!function_exists('audit_badge_class')) {
                     <div class="cards">
                         <div class="card"><span class="card-icon">🎓</span><h4>Active Students</h4><h2><?php echo $statStudents; ?></h2></div>
                         <div class="card"><span class="card-icon">🧑‍💼</span><h4>Staff Accounts</h4><h2><?php echo $statStaff; ?></h2></div>
-                        <div class="card"><span class="card-icon">⏳</span><h4>Pending Requests</h4><h2><?php echo $statPending; ?></h2></div>
                         <div class="card"><span class="card-icon">📢</span><h4>Active Announcements</h4><h2><?php echo $statAnn; ?></h2></div>
                     </div>
 

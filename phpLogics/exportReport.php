@@ -39,7 +39,7 @@ function scalar(mysqli $conn, string $sql, array $params): string
 $submitted = (int)scalar($conn, "SELECT COUNT(*) FROM document_requests WHERE date_requested >= ? AND date_requested < ?", [$start, $end]);
 $released  = (int)scalar($conn, "SELECT COUNT(*) FROM document_requests WHERE date_released >= ? AND date_released < ?", [$start, $end]);
 $rejected  = (int)scalar($conn, "SELECT COUNT(*) FROM document_requests WHERE cancelled_by = 'registrar' AND updated_at >= ? AND updated_at < ?", [$start, $end]);
-$cancelled = (int)scalar($conn, "SELECT COUNT(*) FROM document_requests WHERE cancelled_by IN ('student','unclaimed') AND updated_at >= ? AND updated_at < ?", [$start, $end]);
+$cancelled = (int)scalar($conn, "SELECT COUNT(*) FROM document_requests WHERE cancelled_by = 'student' AND updated_at >= ? AND updated_at < ?", [$start, $end]);
 
 // ── Current backlog (all-time snapshot) ──
 $pending    = (int)scalar($conn, "SELECT COUNT(*) FROM document_requests WHERE status = 'Pending'", []);
@@ -137,7 +137,7 @@ $html = "
         <tr><td>Requests submitted</td><td class='n'>{$submitted}</td></tr>
         <tr><td>Documents released (with e-certificate)</td><td class='n'>{$released}</td></tr>
         <tr><td>Requests rejected by the registrar</td><td class='n'>{$rejected}</td></tr>
-        <tr><td>Cancelled / unclaimed</td><td class='n'>{$cancelled}</td></tr>
+        <tr><td>Cancelled by student</td><td class='n'>{$cancelled}</td></tr>
         <tr><td>Currently waiting (Pending)</td><td class='n'>{$pending}</td></tr>
         <tr><td>Currently in process (Processing)</td><td class='n'>{$processing}</td></tr>
     </table>

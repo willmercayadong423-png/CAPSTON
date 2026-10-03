@@ -9,7 +9,13 @@
 require __DIR__ . "/auth.php";
 include(__DIR__ . "/../database/db.php");
 
-require_role('registrar');
+// Registrar AND Admin — the Admin dashboard adopted the registrar's
+// request-management views, including the monthly report export.
+$role = strtolower($_SESSION['role'] ?? '');
+if ($role !== 'registrar' && $role !== 'admin') {
+    header('Location: ' . home_for_role($_SESSION['role'] ?? ''));
+    exit;
+}
 require_once __DIR__ . '/../vendor/autoload.php';
 require_once __DIR__ . '/../phpLogics/site_config.php';
 

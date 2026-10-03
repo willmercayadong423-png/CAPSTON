@@ -3,8 +3,9 @@ require __DIR__ . "/auth.php";
 include __DIR__ . "/../database/db.php";
 header('Content-Type: application/json');
 
-// ── Registrar only ────────────────────────────────────────────────
-if (strtolower($_SESSION['role'] ?? '') !== 'registrar') {
+// ── Registrar AND Admin (the Admin dashboard mirrors the registrar's request UI)
+$role = strtolower($_SESSION['role'] ?? '');
+if ($role !== 'registrar' && $role !== 'admin') {
     http_response_code(403);
     echo json_encode(['error' => 'Unauthorized']);
     exit;

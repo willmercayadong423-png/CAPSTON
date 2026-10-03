@@ -6,7 +6,7 @@
 
 /* ══════════ View switcher ══════════ */
 function showView(view) {
-    ['overview', 'announcements', 'accounts', 'settings', 'information', 'audit', 'account'].forEach(function (v) {
+    ['overview', 'announcements', 'accounts', 'settings', 'information', 'audit', 'account', 'requests'].forEach(function (v) {
         var el = document.getElementById('view-' + v);
         if (el) el.style.display = (v === view) ? 'block' : 'none';
         var nav = document.getElementById('nav-' + v);
@@ -1139,3 +1139,504 @@ document.addEventListener('DOMContentLoaded', function () {
     });
     document.getElementById('btn-save-account').addEventListener('click', saveAccount);
 });
+
+/* ═══════════════════════════════════════════════════════════════
+   STUDENT REQUESTS (adopted from the Registrar dashboard)
+   Accept / reject / view details / release — identical behaviour,
+   identical modals. Elements live inside #view-requests and the four
+   body-level modals (#file-modal, #release-modal, #reject-modal,
+   #doc-lightbox).
+   ═══════════════════════════════════════════════════════════════ */
+
+(function () {
+    'use strict';
+
+    /* ── Main/History sub-tab switch inside the Requests view ── */
+    window.switchReqTab = function (tab) {
+        var isMain = tab === 'main';
+        var vMain = document.getElementById('view-main');
+        var vArch = document.getElementById('view-archived');
+        if (!vMain || !vArch) return;
+        vMain.style.display = isMain ? '' : 'none';
+        vArch.style.display = isMain ? 'none' : '';
+        document.getElementById('tab-main').classList.toggle('active', isMain);
+        document.getElementById('tab-archived').classList.toggle('active', !isMain);
+    };
+
+    /* ── Search + status-chip filtering (combined) ── */
+    var rowFilters = {
+        main:     { query: '', status: '' },
+        archived: { query: '', status: '' }
+    };
+
+    function applyRowFilter(scope) {
+        var tbody = document.getElementById(scope === 'main' ? 'main-tbody' : 'archived-tbody');
+        if (!tbody) return;
+
+        var state = rowFilters[scope];
+        var q = state.query.toLowerCase();
+        var rows = tbody.getElementsByTagName('tr');
+
+        for (var i = 0; i < rows.length; i++) {
+            var tr = rows[i];
+            if (tr.classList.contains('empty-row')) continue;
+
+            var text = tr.textContent.toLowerCase();
+            var matchesQuery  = !q || text.indexOf(q) !== -1;
+            var matchesStatus = !state.status || tr.getAttribute('data-status') === state.status;
+            tr.style.display = (matchesQuery && matchesStatus) ? '' : 'none';
+        }
+    }
+
+    function setQuery(scope, q) {
+        rowFilters[scope].query = q;
+        applyRowFilter(scope);
+    }
+
+    function setupChips(scope) {
+        var chipBox = document.getElementById('chips-' + scope);
+        if (!chipBox) return;
+        chipBox.addEventListener('click', function (e) {
+            var chip = e.target.closest('.chip');
+            if (!chip) return;
+            chipBox.querySelectorAll('.chip').forEach(function (c) { c.classList.remove('active'); });
+            chip.classList.add('active');
+            rowFilters[scope].status = chip.getAttribute('data-filter') || '';
+            applyRowFilter(scope);
+        });
+    }
+
+    /* ── Escape helper for HTML/attributes ── */
+    function escapeAttr(s) {
+        return String(s)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    /* ── Status badge (mirrors the PHP statusBadge helper) ── */
+    function statusBadgeHtml(status, cancelledBy) {
+        if (status === 'Cancelled') {
+            if (cancelledBy === 'registrar') return '<span class="status rejected">Rejected</span>';
+            return '<span class="status cancelled">Cancelled</span>';
+        }
+        var cls = {
+            'Pending': 'pending', 'Processing': 'processing',
+            'Ready for Pickup': 'ready', 'Released': 'released'
+        }[status] || 'pending';
+        return '<span class="status ' + cls + '">' + escapeAttr(status) + '</span>';
+    }
+
+    function initialsOf(name) {
+        var parts = String(name).trim().split(/\s+/);
+        var first = (parts[0] || ' ')[0] || '';
+        var last  = parts.length > 1 ? (parts[parts.length - 1][0] || '') : '';
+        return (first + last).toUpperCase();
+    }
+
+    /* ── Document requirement card metadata ── */
+    var DOC_META = {
+        idPhoto: { icon: '🪪', title: 'Valid ID',      tag: 'Required', cls: 'tag-req',  field: 'id_photo' },
+        eCert:   { icon: '🎓', title: 'E-Certificate', tag: 'Released', cls: 'tag-cert', field: 'e_certificate' }
+    };
+
+    /* ── Request details modal ── */
+    function openRequestModal(btn) {
+        var d = btn.dataset;
+
+        document.getElementById('modal-req-id').textContent =
+            'Request #' + String(d.reqId || '').padStart(4, '0');
+        document.getElementById('ms-student').textContent = d.student || '—';
+        document.getElementById('ms-doc').textContent     = d.doc    || '—';
+        document.getElementById('ms-date').textContent    = d.date   || '—';
+        document.getElementById('ms-status-wrap').innerHTML =
+            statusBadgeHtml(d.status || '', d.cancelled || '');
+
+        var av = document.getElementById('ms-avatar');
+        av.innerHTML = '';
+        av.textContent = initialsOf(d.student || '');
+        if (d.avatar) {
+            var img = document.createElement('img');
+            img.src = '../' + d.avatar;
+            img.alt = '';
+            img.onerror = function () { img.remove(); };
+            av.appendChild(img);
+        }
+
+        document.getElementById('modal-purpose').textContent = d.purpose || '—';
+
+        renderDocs(d);
+
+        document.getElementById('student-info').innerHTML =
+            '<p class="history-loading">Loading…</p>';
+        loadRequestHistory(d.reqId);
+
+        document.getElementById('file-modal').style.display = 'flex';
+        document.getElementById('file-modal').querySelector('.modal-scroll').scrollTop = 0;
+        document.body.style.overflow = 'hidden';
+    }
+
+    function renderDocs(d) {
+        var grid = document.getElementById('docs-grid');
+        grid.innerHTML = '';
+        var slots = [['idPhoto', 'id-photo'], ['eCert', 'e-cert']];
+        var shown = 0;
+        slots.forEach(function (pair) {
+            if (!d[pair[0]]) return;
+            grid.appendChild(buildDocCard(DOC_META[pair[0]], d[pair[0]], d.reqId));
+            shown++;
+        });
+        if (!shown) grid.innerHTML = '<p class="docs-empty">No files were attached to this request.</p>';
+    }
+
+    function buildDocCard(meta, filePath, reqId) {
+        var url  = '../phpLogics/downloadReqFile.php?req_id=' + encodeURIComponent(reqId) +
+                   '&field=' + encodeURIComponent(meta.field);
+        var name = filePath.split('/').pop();
+        var ext  = name.split('.').pop().toLowerCase();
+        var isImg = ['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext);
+        var isPdf = ext === 'pdf';
+
+        var card = document.createElement('div');
+        card.className = 'doc-card';
+
+        var head =
+            '<div class="doc-card-head">' +
+                '<span class="doc-card-icon">' + meta.icon + '</span>' +
+                '<span class="doc-card-title">' + escapeAttr(meta.title) + '</span>' +
+                '<span class="doc-card-tag ' + meta.cls + '">' + meta.tag + '</span>' +
+            '</div>';
+
+        var prev;
+        if (isImg) {
+            prev =
+                '<div class="doc-thumb" title="Click to enlarge">' +
+                    '<img src="' + escapeAttr(url) + '" alt="' + escapeAttr(meta.title) + '" loading="lazy">' +
+                    '<span class="doc-zoom">🔍 Click to enlarge</span>' +
+                '</div>';
+        } else if (isPdf) {
+            prev =
+                '<div class="doc-thumb doc-thumb-pdf" data-pdf="' + escapeAttr(url) + '" title="Open PDF viewer">' +
+                    '<span class="pdf-icon">📄</span>' +
+                    '<span class="doc-fmt">PDF Document</span>' +
+                    '<span class="doc-zoom">📖 Open viewer</span>' +
+                '</div>';
+        } else {
+            prev =
+                '<div class="doc-thumb doc-thumb-file">' +
+                    '<span class="pdf-icon">🗂️</span>' +
+                    '<span class="doc-fmt">' + escapeAttr(ext.toUpperCase()) + ' File</span>' +
+                '</div>';
+        }
+
+        var foot =
+            '<div class="doc-card-foot">' +
+                '<span class="doc-filename" title="' + escapeAttr(name) + '">' + escapeAttr(name) + '</span>' +
+                '<span class="doc-actions">' +
+                    (isPdf ? '<a class="doc-act" href="' + escapeAttr(url) + '" target="_blank" rel="noopener">👁 View</a>' : '') +
+                    '<a class="doc-act doc-act-dl" href="' + escapeAttr(url) + '" download="' + escapeAttr(name) + '">⬇ Download</a>' +
+                '</span>' +
+            '</div>';
+
+        card.innerHTML = head + prev + foot;
+        return card;
+    }
+
+    /* ── Fullscreen lightbox (image / PDF) ── */
+    function openLightbox(url, caption, isPdf) {
+        document.getElementById('lightbox-caption').textContent = caption;
+        document.getElementById('lightbox-open').href = url;
+
+        var img   = document.getElementById('lightbox-img');
+        var frame = document.getElementById('lightbox-frame');
+
+        if (isPdf) {
+            img.style.display   = 'none';  img.src   = '';
+            frame.style.display = 'block'; frame.src = url;
+        } else {
+            frame.style.display = 'none';  frame.src = 'about:blank';
+            img.style.display   = 'block'; img.src   = url;
+        }
+        document.getElementById('doc-lightbox').classList.add('open');
+    }
+
+    function closeLightbox() {
+        var lb = document.getElementById('doc-lightbox');
+        if (!lb.classList.contains('open')) return;
+        lb.classList.remove('open');
+        document.getElementById('lightbox-img').src   = '';
+        document.getElementById('lightbox-frame').src = 'about:blank';
+        if (document.getElementById('file-modal').style.display !== 'flex') {
+            document.body.style.overflow = '';
+        }
+    }
+
+    /* ── Student info + request history (single AJAX call) ── */
+    function loadRequestHistory(reqId) {
+        var box = document.getElementById('content-history');
+        if (!box) return;
+        box.innerHTML = '<p class="history-loading">Loading…</p>';
+        if (!reqId) { box.innerHTML = '<p class="history-loading">—</p>'; return; }
+
+        fetch('../phpLogics/getStudentHistory.php?req_id=' + encodeURIComponent(reqId))
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                renderHistory(box, data);
+                renderStudentInfo(data && data.student);
+            })
+            .catch(function () {
+                box.innerHTML = '<p class="history-loading">Failed to load history.</p>';
+                document.getElementById('student-info').innerHTML =
+                    '<p class="history-loading">Failed to load student record.</p>';
+            });
+    }
+
+    function renderStudentInfo(s) {
+        var box = document.getElementById('student-info');
+        if (!s) {
+            box.innerHTML = '<p class="history-loading">No student record found.</p>';
+            return;
+        }
+        var fields = [
+            ['Student ID',     s.student_id],
+            ['LRN',            s.lrn],
+            ['Email',          s.email],
+            ['Contact Number', s.contact]
+        ];
+        var html = '';
+        fields.forEach(function (f) {
+            html += '<div class="si-cell">' +
+                        '<span class="si-label">' + f[0] + '</span>' +
+                        '<span class="si-value" title="' + escapeAttr(f[1] || '') + '">' +
+                            (f[1] ? escapeAttr(f[1]) : '—') +
+                        '</span>' +
+                    '</div>';
+        });
+        box.innerHTML = html;
+    }
+
+    function renderHistory(box, data) {
+        if (!data || data.error || !data.items || !data.items.length) {
+            box.innerHTML = '<p class="history-loading">No previous requests.</p>';
+            return;
+        }
+        var html = '';
+        if (data.same_doc_count > 0) {
+            var lastTxt = data.same_doc_last ? ' — most recent was ' + data.same_doc_last : '';
+            html += '<div class="history-banner repeat">'
+                  + '🔁 This student already requested <strong>' + escapeAttr(data.current_doc || 'this document') + '</strong> '
+                  + data.same_doc_count + ' time(s) before' + lastTxt + '.'
+                  + '</div>';
+        } else {
+            html += '<div class="history-banner first">✅ First time this student requests <strong>'
+                  + escapeAttr(data.current_doc || 'this document') + '</strong>.</div>';
+        }
+        data.items.forEach(function (it) {
+            var cls = it.status === 'Cancelled' ? 'cancelled' : (it.status === 'Released' ? 'released' : 'open');
+            html += '<div class="history-item' + (it.is_current ? ' current' : '') + '">'
+                  + (it.is_current ? '<span class="history-now">THIS REQUEST</span>' : '')
+                  + '<span class="history-doc">' + escapeAttr(it.document_type || '')
+                  + (it.same_doc ? ' <span class="same-doc-tag">SAME DOC</span>' : '')
+                  + '</span>'
+                  + '<span class="history-status ' + cls + '">' + escapeAttr(it.status_label || it.status || '') + '</span>'
+                  + '<span class="history-date">' + escapeAttr(it.date_requested || '') + '</span>'
+                  + '</div>';
+        });
+        box.innerHTML = html;
+    }
+
+    /* ── Modal close helpers ── */
+    function closeModal() {
+        closeLightbox();
+        var fm = document.getElementById('file-modal');
+        if (fm) fm.style.display = 'none';
+        document.getElementById('ms-student').textContent    = '—';
+        document.getElementById('ms-doc').textContent        = '—';
+        document.getElementById('ms-date').textContent       = '—';
+        document.getElementById('ms-status-wrap').innerHTML  = '—';
+        document.getElementById('ms-avatar').innerHTML       = '';
+        document.getElementById('modal-purpose').textContent = '—';
+        document.getElementById('docs-grid').innerHTML       = '';
+        document.getElementById('student-info').innerHTML    = '';
+        document.getElementById('content-history').innerHTML = '';
+        document.body.style.overflow = '';
+    }
+
+    function buildPreviewParams(reqId) {
+        return new URLSearchParams({
+            req_id:        reqId,
+            title:         document.getElementById('rf-title').value,
+            body:          document.getElementById('rf-body').value,
+            officer_name:  document.getElementById('rf-officer').value,
+            officer_title: document.getElementById('rf-officer-title').value,
+            cert_date:     document.getElementById('rf-date').value,
+            remarks:       document.getElementById('rf-remarks').value
+        });
+    }
+
+    function refreshCertPreview() {
+        var reqId = document.getElementById('rel-req-id-input').value;
+        if (!reqId) return;
+        document.getElementById('rel-preview').src =
+            '../phpLogics/previewCertificate.php?' + buildPreviewParams(reqId).toString();
+    }
+
+    function closeReleaseModal() {
+        document.getElementById('release-modal').style.display = 'none';
+        document.getElementById('rel-preview').src = 'about:blank';
+    }
+
+    /* ── Reject reason modal (exposed: inline onclick uses it) ── */
+    window.openRejectModal = function (reqId) {
+        document.getElementById('reject-req-id').value = reqId;
+        document.getElementById('reject-modal').classList.add('open');
+        document.getElementById('reject-reason-input').value = '';
+        setTimeout(function () { document.getElementById('reject-reason-input').focus(); }, 60);
+    };
+    window.closeRejectModal = function () {
+        document.getElementById('reject-modal').classList.remove('open');
+    };
+
+    /* ── Wire everything once the DOM is ready ── */
+    document.addEventListener('DOMContentLoaded', function () {
+        var tMain = document.getElementById('tab-main');
+        var tArch = document.getElementById('tab-archived');
+        if (tMain) tMain.addEventListener('click', function () { switchReqTab('main'); });
+        if (tArch) tArch.addEventListener('click', function () { switchReqTab('archived'); });
+
+        var sMain = document.getElementById('search-main');
+        var sArch = document.getElementById('search-archived');
+        if (sMain) sMain.addEventListener('input', function () { setQuery('main', this.value); });
+        if (sArch) sArch.addEventListener('input', function () { setQuery('archived', this.value); });
+
+        setupChips('main');
+        setupChips('archived');
+
+        /* Clickable stat cards → jump to the filtered table */
+        document.querySelectorAll('.reqmgr .card-click').forEach(function (card) {
+            card.addEventListener('click', function () {
+                showView('requests');
+                var tab = card.dataset.tab === 'archived' ? 'archived' : 'main';
+                switchReqTab(tab);
+
+                var status = card.dataset.goto || '';
+                var chips = document.getElementById('chips-' + tab);
+                if (chips) {
+                    var chip = chips.querySelector('[data-filter="' + status + '"]');
+                    if (chip) chip.click();
+                    else {
+                        var all = chips.querySelector('[data-filter=""]');
+                        if (all) all.click();
+                    }
+                }
+                document.getElementById(tab === 'main' ? 'view-main' : 'view-archived')
+                    .scrollIntoView({ behavior: 'smooth', block: 'start' });
+            });
+        });
+
+        /* Request detail modal — delegated open */
+        document.body.addEventListener('click', function (e) {
+            var btn = e.target.closest('.btn-view-files');
+            if (btn) openRequestModal(btn);
+        });
+
+        /* Doc previews → lightbox */
+        var docsGrid = document.getElementById('docs-grid');
+        if (docsGrid) {
+            docsGrid.addEventListener('click', function (e) {
+                var thumb = e.target.closest('.doc-thumb');
+                if (!thumb) return;
+                var cardEl = thumb.closest('.doc-card');
+                var title = cardEl ? cardEl.querySelector('.doc-card-title').textContent : 'Document';
+                if (thumb.dataset.pdf) {
+                    openLightbox(thumb.dataset.pdf, title + ' — PDF Document', true);
+                } else {
+                    var img = thumb.querySelector('img');
+                    if (img) openLightbox(img.getAttribute('src'), title, false);
+                }
+            });
+        }
+
+        var closeBtn = document.getElementById('closeFileModal');
+        if (closeBtn) closeBtn.addEventListener('click', closeModal);
+        var fileModal = document.getElementById('file-modal');
+        if (fileModal) fileModal.addEventListener('click', function (e) { if (e.target === this) closeModal(); });
+
+        var lbClose = document.getElementById('lightbox-close');
+        if (lbClose) lbClose.addEventListener('click', closeLightbox);
+        var lightbox = document.getElementById('doc-lightbox');
+        if (lightbox) lightbox.addEventListener('click', function (e) { if (e.target === this) closeLightbox(); });
+
+        /* Release modal — delegated open + defaults fetch */
+        document.body.addEventListener('click', function (e) {
+            var btn = e.target.closest('.btn-release');
+            if (!btn) return;
+
+            document.getElementById('rel-req-id').textContent =
+                'Request #' + String(btn.dataset.reqId || '').padStart(4, '0');
+            document.getElementById('rel-req-id-input').value = btn.dataset.reqId || '';
+            document.getElementById('rel-student').textContent = btn.dataset.student || '—';
+            document.getElementById('rel-doc').textContent     = btn.dataset.doc || '—';
+
+            fetch('../phpLogics/previewCertificate.php?req_id=' + encodeURIComponent(btn.dataset.reqId) + '&format=json')
+                .then(function (r) { return r.json(); })
+                .then(function (data) {
+                    if (!data || !data.ok) return;
+                    var d = data.defaults || {};
+                    document.getElementById('rf-title').value         = d.title || '';
+                    document.getElementById('rf-date').value          = d.cert_date || '';
+                    document.getElementById('rf-officer').value       = d.officer_name || '';
+                    document.getElementById('rf-officer-title').value = d.officer_title || '';
+                    document.getElementById('rf-body').value          = d.body || '';
+                    document.getElementById('rf-remarks').value       = d.remarks || '';
+                    refreshCertPreview();
+                })
+                .catch(function () {
+                    document.getElementById('rel-preview').src = 'about:blank';
+                });
+
+            document.getElementById('release-modal').style.display = 'flex';
+        });
+
+        var closeRel = document.getElementById('closeReleaseModal');
+        if (closeRel) closeRel.addEventListener('click', closeReleaseModal);
+        var relModal = document.getElementById('release-modal');
+        if (relModal) relModal.addEventListener('click', function (e) { if (e.target === this) closeReleaseModal(); });
+
+        var refreshBtn = document.getElementById('btn-refresh-preview');
+        if (refreshBtn) refreshBtn.addEventListener('click', refreshCertPreview);
+
+        var fullBtn = document.getElementById('btn-fullscreen-preview');
+        if (fullBtn) fullBtn.addEventListener('click', function () {
+            var reqId = document.getElementById('rel-req-id-input').value;
+            if (!reqId) return;
+            window.open('../phpLogics/previewCertificate.php?' + buildPreviewParams(reqId).toString(), '_blank');
+        });
+
+        ['rf-title', 'rf-date', 'rf-officer', 'rf-officer-title', 'rf-body', 'rf-remarks'].forEach(function (id) {
+            var el = document.getElementById(id);
+            if (el) el.addEventListener('change', refreshCertPreview);
+        });
+
+        /* Reject modal: backdrop close */
+        document.addEventListener('click', function (e) {
+            var modal = document.getElementById('reject-modal');
+            if (modal && e.target === modal) closeRejectModal();
+        });
+
+        /* Keyboard: Esc closes lightbox → detail modal → release modal → reject */
+        document.addEventListener('keydown', function (e) {
+            if (e.key !== 'Escape') return;
+            var lb = document.getElementById('doc-lightbox');
+            var rm = document.getElementById('release-modal');
+            var fm = document.getElementById('file-modal');
+            var rj = document.getElementById('reject-modal');
+            if (lb && lb.classList.contains('open')) closeLightbox();
+            else if (rm && rm.style.display === 'flex') closeReleaseModal();
+            else if (fm && fm.style.display === 'flex') closeModal();
+            else if (rj && rj.classList.contains('open')) closeRejectModal();
+        });
+    });
+})();

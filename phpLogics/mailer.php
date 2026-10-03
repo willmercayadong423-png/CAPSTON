@@ -243,3 +243,51 @@ function send_certificate_email(string $toEmail, string $toName, string $reqNo, 
         return ['ok' => false, 'error' => $e->getMessage()];
     }
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   notifyStudentStatus — email the student when a request status
+   changes. Shared by the Registrar AND Admin dashboards (both drive
+   request statuses); fires on Processing (accepted), Released and
+   legacy "Ready for Pickup", plus registrar/admin rejections.
+   Failures are logged server-side and never block the update.
+   ═══════════════════════════════════════════════════════════════ */
+function notifyStudentStatus(mysqli $conn, int $req_id, string $newStatus, ?string $reason = null, ?string $cancelledBy = null): void
+{
+    $notifyable = ['Processing', 'Ready for Pickup', 'Released'];
+    $isRejected = ($newStatus === 'Cancelled' && $cancelledBy === 'registrar');
+    if (!in_array($newStatus, $notifyable, true) && !$isRejected) {
+        return;
+    }
+
+    $q = $conn->prepare(
+        "SELECT s.email, s.first_name, s.last_name, dr.document_type
+         FROM document_requests dr
+         JOIN users s ON dr.user_id = s.id
+         WHERE dr.id = ?"
+    );
+    $q->bind_param("i", $req_id);
+    $q->execute();
+    $info = $q->get_result()->fetch_assoc();
+    $q->close();
+
+    if (!$info || empty($info['email'])) {
+        return;
+    }
+
+    $fullName = trim(($info['first_name'] ?? '') . ' ' . ($info['last_name'] ?? ''));
+    $reqNo    = 'REQ-' . str_pad((string) $req_id, 4, '0', STR_PAD_LEFT);
+    $mailStatus = $isRejected ? 'Rejected' : $newStatus;
+
+    $result = send_status_email(
+        $info['email'],
+        $fullName,
+        $reqNo,
+        $info['document_type'] ?? 'your document',
+        $mailStatus,
+        $reason
+    );
+
+    if (!$result['ok']) {
+        error_log("Status mail failed for {$reqNo} ({$newStatus}): " . $result['error']);
+    }
+}

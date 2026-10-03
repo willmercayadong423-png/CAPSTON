@@ -5,6 +5,14 @@ include __DIR__ . "/../phpLogics/site_config.php";
 
 require_role('admin');
 
+// ── Shared request-management includes ─────────────────────────────
+// The Admin dashboard adopts the Registrar's request-processing
+// capabilities: status changes (accept/reject), detail viewing and
+// e-certificate release all reuse the same shared logic.
+require_once __DIR__ . '/../phpLogics/mailer.php';       // notifyStudentStatus()
+require_once __DIR__ . '/../phpLogics/certificate.php';  // certificate_fetch()/generate
+require_once __DIR__ . '/../phpLogics/audit.php';        // audit_log()
+
 $user_id = (int)$_SESSION['user_id'];
 $csrf    = csrf_token();
 
@@ -35,6 +43,403 @@ if ($activeView === 'announcements') $activeView = 'information';
 $statStudents  = $conn->query("SELECT COUNT(*) FROM users WHERE LOWER(role)='student' AND LOWER(status)!='archived'")->fetch_row()[0];
 $statStaff     = $conn->query("SELECT COUNT(*) FROM users WHERE LOWER(role) IN ('registrar','admin') AND LOWER(status)!='archived'")->fetch_row()[0];
 $statAnn       = $conn->query("SELECT COUNT(*) FROM announcements WHERE is_active=1")->fetch_row()[0];
+
+/* ═════════════════════════════════════════════════════════════════
+   REQUEST MANAGEMENT (adopted from the Registrar dashboard)
+   Same handlers, same tables, same modals — the admin can accept,
+   reject, view details and release certificates exactly like the
+   registrar. Shared pieces live in phpLogics/ (mailer, certificate,
+   audit, previewCertificate, getStudentHistory, downloadReqFile).
+   ═════════════════════════════════════════════════════════════════ */
+
+/* ── Handle release — system-generated e-certificate ─────────────── */
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['release_request'])) {
+    if (!verifyCsrfToken()) {
+        header("Location: adminDashboard.php?view=requests&error=csrf_fail");
+        exit();
+    }
+
+    $req_id = (int)$_POST['req_id'];
+    $row    = certificate_fetch($conn, $req_id);
+
+    if (!$row) {
+        header("Location: adminDashboard.php?view=requests&release_error=" . urlencode('Request not found.'));
+        exit();
+    }
+
+    // ── Admin edits (fall back to system defaults when empty) ──
+    $edits = [
+        'title'         => trim((string)($_POST['cert_title']    ?? '')),
+        'body'          => trim((string)($_POST['cert_body']     ?? '')),
+        'officer_name'  => trim((string)($_POST['officer_name']  ?? '')),
+        'officer_title' => trim((string)($_POST['officer_title'] ?? '')),
+        'cert_date'     => trim((string)($_POST['cert_date']     ?? '')),
+        'remarks'       => trim((string)($_POST['remarks']       ?? '')),
+    ];
+
+    // Signing-officer default: the admin currently logged in
+    $q = $conn->prepare("SELECT first_name, last_name FROM users WHERE id = ?");
+    $q->bind_param("i", $_SESSION['user_id']);
+    $q->execute();
+    $meRow = $q->get_result()->fetch_assoc();
+    $q->close();
+    $officerDefault = $meRow ? trim($meRow['first_name'] . ' ' . $meRow['last_name']) : '';
+    $certData = certificate_build_data($row, $edits, $officerDefault);
+
+    try {
+        $pdf = generate_certificate_pdf($certData);
+    } catch (Throwable $e) {
+        error_log("Certificate generation failed (REQ-{$req_id}): " . $e->getMessage());
+        header("Location: adminDashboard.php?view=requests&release_error=" . urlencode('Certificate generation failed. Please try again.'));
+        exit();
+    }
+
+    // ── Save the generated PDF ──
+    $uploads_fs  = dirname(__DIR__) . '/uploads';
+    $dir         = $uploads_fs . '/e_certificates/';
+    if (!is_dir($dir)) mkdir($dir, 0755, true);
+
+    $filename = 'cert_' . $req_id . '_' . time() . '_' . rand(100, 999) . '.pdf';
+    if (file_put_contents($dir . $filename, $pdf) === false) {
+        header("Location: adminDashboard.php?view=requests&release_error=" . urlencode('Failed to save the certificate file. Please try again.'));
+        exit();
+    }
+
+    // Replace: remove the previous certificate file if any
+    if (!empty($row['e_certificate'])) {
+        $old = $uploads_fs . '/' . ltrim($row['e_certificate'], '/');
+        if (file_exists($old)) unlink($old);
+    }
+
+    $certWeb = 'uploads/e_certificates/' . $filename;
+
+    $upd = $conn->prepare(
+        "UPDATE document_requests
+         SET status = 'Released', cancelled_by = NULL,
+             date_released = NOW(), e_certificate = ?
+         WHERE id = ?"
+    );
+    $upd->bind_param("si", $certWeb, $req_id);
+    $upd->execute();
+    $upd->close();
+
+    // ── Email the certificate to the student ──
+    $stu = null;
+    $q = $conn->prepare("SELECT email, first_name, last_name FROM users WHERE id = ?");
+    $q->bind_param("i", $row['student_pk']);
+    $q->execute();
+    $stu = $q->get_result()->fetch_assoc();
+    $q->close();
+
+    $mailSent = false;
+    if ($stu && !empty($stu['email'])) {
+        $fullName = trim($stu['first_name'] . ' ' . $stu['last_name']);
+        $reqNo    = $certData['req_no'];
+        $result   = send_certificate_email($stu['email'], $fullName, $reqNo, $row['document_type'], $certWeb);
+        $mailSent = $result['ok'];
+        if (!$mailSent) {
+            error_log("Release mail failed for {$reqNo}: " . $result['error']);
+        }
+    } else {
+        error_log("Release mail skipped (no email on file) for REQ-{$req_id}.");
+    }
+
+    // ── Audit — wording reflects the REAL mail outcome ──
+    audit_log($conn, 'CERTIFICATE_RELEASED', 'document_request', $certData['req_no'],
+        "{$row['document_type']} — e-certificate generated"
+        . (($stu && !empty($stu['email']))
+            ? ($mailSent ? " and emailed to {$stu['email']}"
+                         : " — email to {$stu['email']} FAILED (certificate is still downloadable from the dashboard)")
+            : ' (no email on file — NOT emailed)'));
+
+    header("Location: adminDashboard.php?view=requests&released=1");
+    exit();
+}
+
+/* ── Handle status update (accept / reject / re-queue) ───────────── */
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_status'])) {
+    // ── CSRF check ──
+    if (!verifyCsrfToken()) {
+        header("Location: adminDashboard.php?view=requests&error=csrf_fail");
+        exit();
+    }
+
+    $req_id    = (int)$_POST['req_id'];
+    $newStatus = $_POST['new_status'];
+    $allowed   = ['Pending', 'Processing', 'Ready for Pickup', 'Released', 'Cancelled'];
+
+    if (in_array($newStatus, $allowed, true)) {
+        $dbStatus    = $newStatus;
+        $cancelledBy = null;
+
+        // ── Audit: remember the current status for the change log ──
+        $old = $conn->prepare("SELECT status FROM document_requests WHERE id = ?");
+        $old->bind_param("i", $req_id);
+        $old->execute();
+        $oldStatus = (string)($old->get_result()->fetch_row()[0] ?? '?');
+        $old->close();
+
+        if ($newStatus === 'Cancelled') {
+            // Rejection — a written reason is REQUIRED so the student knows why.
+            $cancelledBy  = 'registrar';   // recorded as a staff rejection
+            $rejectReason = trim((string)($_POST['reject_reason'] ?? ''));
+            if ($rejectReason === '') {
+                header("Location: adminDashboard.php?view=requests&error=reason_required");
+                exit();
+            }
+        } else {
+            $rejectReason = null;
+        }
+
+        $upd = $conn->prepare(
+            "UPDATE document_requests
+             SET status        = ?,
+                 cancelled_by  = CASE
+                                    WHEN ? = 'Cancelled' THEN ?
+                                    WHEN ? IN ('Released','Pending') THEN NULL
+                                    ELSE cancelled_by
+                                 END,
+                 rejection_reason = CASE
+                                    WHEN ? = 'Cancelled' THEN ?
+                                    ELSE NULL
+                                 END,
+                 date_released = CASE
+                                    WHEN ? = 'Released' THEN NOW()
+                                    WHEN ? = 'Pending'  THEN NULL
+                                    ELSE date_released
+                                 END
+             WHERE id = ?"
+        );
+        $upd->bind_param("ssssssssi", $dbStatus, $dbStatus, $cancelledBy, $dbStatus, $dbStatus, $rejectReason, $dbStatus, $dbStatus, $req_id);
+        $upd->execute();
+
+        if ($upd->affected_rows > 0) {
+            audit_log($conn, 'STATUS_CHANGED', 'document_request',
+                'REQ-' . str_pad((string) $req_id, 4, '0', STR_PAD_LEFT),
+                "{$oldStatus} → {$dbStatus}"
+                . ($cancelledBy !== null ? " (by admin)" : '')
+                . (!empty($rejectReason) ? " — Reason: {$rejectReason}" : ''));
+        }
+        $upd->close();
+
+        // 📧 Notify the student when the request reaches a key status
+        notifyStudentStatus($conn, $req_id, $newStatus, $rejectReason ?? null, $cancelledBy);
+    }
+    header("Location: adminDashboard.php?view=requests");
+    exit();
+}
+
+// ── Request stats (the registrar's status cards) ──────────────────
+$today = date('Y-m-d');
+
+function countWhere($conn, $where, $types = '', $params = [])
+{
+    $n  = 0;
+    $st = $conn->prepare("SELECT COUNT(*) FROM document_requests WHERE $where");
+    if (!$st) return 0;
+    if ($types) $st->bind_param($types, ...$params);
+    $st->execute();
+    $st->bind_result($n);
+    $st->fetch();
+    $st->close();
+    return $n;
+}
+
+$cntPending    = countWhere($conn, "status = 'Pending'");
+$cntProcessing = countWhere($conn, "status = 'Processing'");
+$cntReleased   = countWhere($conn, "status = 'Released'");
+$cntToday      = countWhere($conn, "DATE(date_requested) = ?", "s", [$today]);
+$cntRejected   = countWhere($conn, "status = 'Cancelled' AND cancelled_by = 'registrar'");
+
+// ── Recent requests (latest 6, any status) ────────────────────────
+$recentReq = $conn->prepare(
+    "SELECT dr.id, dr.document_type, dr.status, dr.cancelled_by, dr.date_requested,
+            CONCAT(s.first_name,' ',s.last_name) AS student_name
+     FROM document_requests dr JOIN users s ON dr.user_id = s.id
+     ORDER BY dr.date_requested DESC, dr.id DESC LIMIT 6"
+);
+$recentReq->execute();
+$recentRequests = $recentReq->get_result()->fetch_all(MYSQLI_ASSOC);
+$recentReq->close();
+
+// ── Fetch active rows ─────────────────────────────────────────
+$mainRows = $conn->query(
+    "SELECT dr.*, CONCAT(s.first_name,' ',s.last_name) AS student_name, s.profile_photo
+     FROM document_requests dr
+     JOIN users s ON dr.user_id = s.id
+     WHERE dr.status NOT IN ('Released','Cancelled')
+     ORDER BY dr.date_requested DESC"
+)->fetch_all(MYSQLI_ASSOC);
+
+// ── Fetch archived rows (Released + all cancelled) ────────────
+$archivedRows = $conn->query(
+    "SELECT dr.*, CONCAT(s.first_name,' ',s.last_name) AS student_name, s.profile_photo
+     FROM document_requests dr
+     JOIN users s ON dr.user_id = s.id
+     WHERE dr.status IN ('Released','Cancelled')
+     ORDER BY dr.date_requested DESC"
+)->fetch_all(MYSQLI_ASSOC);
+
+// ── Repeat-request map (🔁 badge) ─────────────────────────────
+$repeatMap = [];
+$rep = $conn->query(
+    "SELECT dr.id,
+            (SELECT COUNT(*) FROM document_requests d2
+             WHERE d2.user_id = dr.user_id
+               AND d2.document_type = dr.document_type
+               AND d2.date_requested < dr.date_requested) AS earlier_count
+     FROM document_requests dr"
+);
+while ($row = $rep->fetch_assoc()) {
+    $repeatMap[(int)$row['id']] = (int)$row['earlier_count'];
+}
+
+// ── Row rendering helpers (same look as the registrar's table) ────
+function statusBadge($status, $cancelledBy = '')
+{
+    if ($status === 'Cancelled') {
+        return match ($cancelledBy) {
+            'registrar' => "<span class=\"status rejected\">Rejected</span>",
+            default     => "<span class=\"status cancelled\">Cancelled</span>",
+        };
+    }
+    $cls = match ($status) {
+        'Pending'          => 'pending',
+        'Processing'       => 'processing',
+        'Ready for Pickup' => 'ready',
+        'Released'         => 'released',
+        default            => 'pending',
+    };
+    return "<span class=\"status {$cls}\">{$status}</span>";
+}
+
+function avatarHtml($r)
+{
+    if (!empty($r['profile_photo'])) {
+        $src = '../' . htmlspecialchars($r['profile_photo']);
+        return "<img src=\"{$src}\" alt=\"avatar\" class=\"avatar-img\">";
+    }
+    $parts    = explode(' ', trim($r['student_name']));
+    $initials = strtoupper(substr($parts[0] ?? '', 0, 1) . substr($parts[1] ?? '', 0, 1));
+    return "<span class=\"avatar-fallback\">{$initials}</span>";
+}
+
+function renderRow($r, $isArchived = false)
+{
+    global $repeatMap;
+
+    $tok     = htmlspecialchars(csrf_token(), ENT_QUOTES);
+    $id      = (int)$r['id'];
+    $padId   = '#' . str_pad($id, 4, '0', STR_PAD_LEFT);
+    $name    = htmlspecialchars($r['student_name']);
+    $doc     = htmlspecialchars($r['document_type']);
+    $purpose = htmlspecialchars($r['purpose'] ?? '—');
+    $dateReq = date('m/d/Y', strtotime($r['date_requested']));
+    $dateRel = !empty($r['date_released']) ? date('m/d/Y', strtotime($r['date_released'])) : '—';
+    $badge   = statusBadge($r['status'], $r['cancelled_by'] ?? '');
+    $cur     = $r['status'];
+    $avatar  = avatarHtml($r);
+
+    $earlier = $repeatMap[$id] ?? 0;
+    $repeatBadge = $earlier > 0
+        ? " <span class=\"repeat-badge\" title=\"Requested this document {$earlier} time(s) before\">🔁 Repeat</span>"
+        : '';
+
+    $hasIdPhoto    = !empty($r['id_photo']);
+    $idPhotoAttr   = $hasIdPhoto    ? htmlspecialchars($r['id_photo'],    ENT_QUOTES) : '';
+    $eCertAttr     = !empty($r['e_certificate']) ? htmlspecialchars($r['e_certificate'], ENT_QUOTES) : '';
+
+    $viewBtn = "<button type='button' class='btn-view-files'
+                    data-req-id=\"{$id}\"
+                    data-id-photo=\"{$idPhotoAttr}\"
+                    data-e-cert=\"{$eCertAttr}\"
+                    data-purpose=\"{$purpose}\"
+                    data-student=\"{$name}\"
+                    data-doc=\"{$doc}\"
+                    data-date=\"" . htmlspecialchars(date('M d, Y', strtotime($r['date_requested'])), ENT_QUOTES) . "\"
+                    data-status=\"" . htmlspecialchars($r['status'], ENT_QUOTES) . "\"
+                    data-cancelled=\"" . htmlspecialchars($r['cancelled_by'] ?? '', ENT_QUOTES) . "\"
+                    data-avatar=\"" . htmlspecialchars($r['profile_photo'] ?? '', ENT_QUOTES) . "\">
+                    📎 View Details
+                </button>";
+
+    if ($isArchived) {
+        $cancelledBy = $r['cancelled_by'] ?? '';
+        $archStatus = 'Released';
+        if ($r['status'] === 'Cancelled') {
+            $archStatus = match ($cancelledBy) {
+                'registrar' => 'Rejected',
+                default     => 'Cancelled',
+            };
+        }
+
+        return "
+        <tr data-status=\"{$archStatus}\">
+            <td><strong>{$padId}</strong></td>
+            <td><div class='student-cell'>{$avatar}<span>{$name}</span></div></td>
+            <td>{$doc}{$repeatBadge}</td>
+            <td>{$dateReq}</td>
+            <td>{$dateRel}</td>
+            <td>{$badge}</td>
+            <td><div class='action-group'>{$viewBtn}</div></td>
+        </tr>";
+    }
+
+    if ($cur === 'Pending') {
+        $acceptBtn = "
+            <form method='POST' style='display:inline;'>
+                <input type='hidden' name='csrf_token' value='{$tok}'>
+                <input type='hidden' name='update_status' value='1'>
+                <input type='hidden' name='req_id' value='{$id}'>
+                <input type='hidden' name='new_status' value='Processing'>
+                <button type='submit' class='btn-accept'
+                        onclick=\"return confirm('Accept this request?')\">✔ Accept</button>
+            </form>";
+        $rejectBtn = "<button type='button' class='btn-reject'
+                        onclick=\"openRejectModal('{$id}')\">✖ Reject</button>";
+        $actions = "<div class='action-group'>{$viewBtn}{$acceptBtn}{$rejectBtn}</div>";
+    } else {
+        $dropdownStatuses = ['Pending', 'Processing', 'Released', 'Cancelled'];
+
+        $opts = '';
+        foreach ($dropdownStatuses as $opt) {
+            $sel   = ($opt === $cur) ? 'selected' : '';
+            $label = ($opt === 'Cancelled') ? 'Reject / Cancel' : $opt;
+            $opts .= "<option value=\"{$opt}\" {$sel}>{$label}</option>";
+        }
+
+        if (!in_array($cur, $dropdownStatuses, true)) {
+            $opts = "<option value=\"{$cur}\" selected>{$cur} (current)</option>{$opts}";
+        }
+        $statusForm = "
+            <form method='POST' style='display:inline;'>
+                <input type='hidden' name='csrf_token' value='{$tok}'>
+                <input type='hidden' name='update_status' value='1'>
+                <input type='hidden' name='req_id' value='{$id}'>
+                <select name='new_status' onchange='if(this.value===\"Cancelled\"){this.form.reset();openRejectModal(\"{$id}\");}else{this.form.submit()}' class='status-select'>
+                    {$opts}
+                </select>
+            </form>";
+        $relBtn = "<button type='button' class='btn-release'
+                        data-req-id=\"{$id}\"
+                        data-student=\"{$name}\"
+                        data-doc=\"{$doc}\"
+                        title=\"Release with a system-generated e-certificate\">
+                        📤 Release
+                    </button>";
+        $actions = "<div class='action-group'>{$viewBtn}{$relBtn}{$statusForm}</div>";
+    }
+
+    return "
+    <tr data-status=\"{$cur}\">
+        <td><strong>{$padId}</strong></td>
+        <td><div class='student-cell'>{$avatar}<span>{$name}</span></div></td>
+        <td>{$doc}{$repeatBadge}</td>
+        <td>{$dateReq}</td>
+        <td>{$badge}</td>
+        <td>{$actions}</td>
+    </tr>";
+}
 
 // ── Announcements ─────────────────────────────────────────────────
 $announcements = $conn->query(
@@ -145,6 +550,7 @@ if (!function_exists('audit_badge_class')) {
     <title>Admin Dashboard — HEHMS</title>
     <link rel="stylesheet" href="../student/dashb.css">
     <link rel="stylesheet" href="admin.css">
+    <link rel="stylesheet" href="../assets/css/requests.css">
     <link rel="stylesheet" href="../assets/css/scroll-table.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -219,6 +625,15 @@ if (!function_exists('audit_badge_class')) {
                     <div class="nmi-icon">🏠</div>
                     <div class="nmi-text">
                         <div class="nmi-title">Dashboard</div>
+                    </div>
+                </a>
+
+                <a onclick="showView('requests')" id="nav-requests"
+                    class="nav-main-item requests <?php echo $activeView === 'requests' ? 'active' : ''; ?>">
+                    <div class="nmi-icon">📋</div>
+                    <div class="nmi-text">
+                        <div class="nmi-title">Student Requests</div>
+                        <div class="nmi-sub">Accept, reject &amp; release</div>
                     </div>
                 </a>
 
@@ -299,6 +714,57 @@ if (!function_exists('audit_badge_class')) {
                         <div class="card"><span class="card-icon">📢</span><h4>Active Announcements</h4><h2><?php echo $statAnn; ?></h2></div>
                     </div>
 
+                    <!-- ══ Request statuses (adopted from the Registrar dashboard) ══ -->
+                    <div class="reqmgr" style="margin-top:26px;">
+                        <div class="cards">
+                            <div class="card card-click" data-goto="Pending" data-view="requests" title="Show pending requests">
+                                <span class="card-icon">⏳</span><h4>Pending Requests</h4><h2><?php echo $cntPending; ?></h2>
+                            </div>
+                            <div class="card card-click" data-goto="Processing" data-view="requests" title="Show processing requests">
+                                <span class="card-icon">⚙️</span><h4>Processing</h4><h2><?php echo $cntProcessing; ?></h2>
+                            </div>
+                            <div class="card card-click" data-goto="Released" data-view="history" title="Show released requests">
+                                <span class="card-icon">✅</span><h4>Released</h4><h2><?php echo $cntReleased; ?></h2>
+                            </div>
+                            <div class="card card-click" data-goto="Rejected" data-view="history" title="Show rejected requests">
+                                <span class="card-icon">🚫</span><h4>Rejected</h4><h2><?php echo $cntRejected; ?></h2>
+                            </div>
+                            <div class="card card-click" data-goto="" data-view="requests" title="Show today's requests">
+                                <span class="card-icon">📅</span><h4>Today's Requests</h4><h2><?php echo $cntToday; ?></h2>
+                            </div>
+                        </div>
+
+                        <div class="dash-grid">
+                            <div class="dash-panel">
+                                <div class="dash-panel-head">
+                                    <h3>🗂️ Recent Requests</h3>
+                                    <button type="button" class="btn-export" onclick="showView('requests')">View all →</button>
+                                </div>
+                                <div class="dash-recent-list">
+                                    <?php if (empty($recentRequests)): ?>
+                                        <p class="dash-empty">No requests yet.</p>
+                                    <?php else: foreach ($recentRequests as $r):
+                                        $badge = statusBadge($r['status'], $r['cancelled_by'] ?? '');
+                                    ?>
+                                        <div class="dash-recent-item">
+                                            <div class="dash-ri-main">
+                                                <strong>REQ-<?php echo str_pad((string)$r['id'], 4, '0', STR_PAD_LEFT); ?></strong>
+                                                <span class="dash-ri-doc"><?php echo htmlspecialchars($r['document_type']); ?></span>
+                                            </div>
+                                            <div class="dash-ri-side">
+                                                <span class="dash-ri-name"><?php echo htmlspecialchars($r['student_name']); ?></span>
+                                                <div>
+                                                    <?php echo $badge; ?>
+                                                    <small class="dash-ri-date"><?php echo date('M d, g:i A', strtotime($r['date_requested'])); ?></small>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    <?php endforeach; endif; ?>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
                     <div class="dashboard-grid">
                         <div class="dashboard-card">
                             <h3>📢 Latest Announcements</h3>
@@ -335,6 +801,135 @@ if (!function_exists('audit_badge_class')) {
                     <button class="save-btn" type="button" onclick="showView('information')">📢 New Announcement</button>
                 </div>
             </div>
+
+            <!-- ════ VIEW 2B: STUDENT REQUESTS (adopted from Registrar) ════ -->
+            <div id="view-requests" class="reqmgr" style="display:<?php echo $activeView === 'requests' ? 'block' : 'none'; ?>;">
+                <div class="page-banner">
+                    <div class="page-banner-icon">📋</div>
+                    <div class="page-banner-content">
+                        <h1>Student <span>Requests</span></h1>
+                        <p>Accept, verify, reject and release document requests — same capabilities as the Registrar's Office.</p>
+                    </div>
+                </div>
+
+                <?php if (isset($_GET['error']) && $_GET['error'] === 'csrf_fail'): ?>
+                    <div class="alert-banner">⚠️ Your session expired — the last action was not performed. Please try again.</div>
+                <?php endif; ?>
+                <?php if (isset($_GET['error']) && $_GET['error'] === 'reason_required'): ?>
+                    <div class="alert-banner">⚠️ A written reason is required when rejecting a request.</div>
+                <?php endif; ?>
+                <?php if (isset($_GET['released'])): ?>
+                    <div class="alert-banner success">✔ Request released — the student has been notified by email.</div>
+                <?php endif; ?>
+                <?php if (isset($_GET['release_error'])): ?>
+                    <div class="alert-banner">⚠️ <?php echo htmlspecialchars($_GET['release_error']); ?></div>
+                <?php endif; ?>
+
+                <!-- Request status cards (registrar statuses) -->
+                <div class="cards">
+                    <div class="card card-click" data-goto="Pending" data-tab="main" title="Show pending requests">
+                        <span class="card-icon">⏳</span><h4>Pending Requests</h4><h2><?php echo $cntPending; ?></h2>
+                    </div>
+                    <div class="card card-click" data-goto="Processing" data-tab="main" title="Show processing requests">
+                        <span class="card-icon">⚙️</span><h4>Processing</h4><h2><?php echo $cntProcessing; ?></h2>
+                    </div>
+                    <div class="card card-click" data-goto="Released" data-tab="archived" title="Show released requests">
+                        <span class="card-icon">✅</span><h4>Released</h4><h2><?php echo $cntReleased; ?></h2>
+                    </div>
+                    <div class="card card-click" data-goto="Rejected" data-tab="archived" title="Show rejected requests">
+                        <span class="card-icon">🚫</span><h4>Rejected</h4><h2><?php echo $cntRejected; ?></h2>
+                    </div>
+                    <div class="card card-click" data-goto="" data-tab="main" title="Show today's requests">
+                        <span class="card-icon">📅</span><h4>Today's Requests</h4><h2><?php echo $cntToday; ?></h2>
+                    </div>
+                </div>
+
+                <!-- Tab switcher -->
+                <div class="switch-btn">
+                    <a class="active" id="tab-main">Main</a>
+                    <a id="tab-archived">History</a>
+                </div>
+
+                <!-- Active requests -->
+                <div class="container" id="view-main">
+                    <div class="table-header">
+                        <h3>Active Requests</h3>
+                        <div class="table-header-controls">
+                            <div class="search-wrapper">
+                                <span class="search-icon">🔍</span>
+                                <input type="text" class="search" id="search-main" placeholder="Search requests...">
+                            </div>
+                            <a class="btn-export" href="../phpLogics/exportReport.php"
+                                title="Printable monthly summary report (PDF)" target="_blank">🧾 Report PDF</a>
+                        </div>
+                    </div>
+
+                    <div class="filter-chips" id="chips-main">
+                        <button type="button" class="chip active" data-filter="">All</button>
+                        <button type="button" class="chip" data-filter="Pending">⏳ Pending</button>
+                        <button type="button" class="chip" data-filter="Processing">⚙️ Processing</button>
+                    </div>
+                    <div class="tbl-scroll-wrap">
+                    <table class="tbl-x" style="min-width: 1000px;">
+                        <thead>
+                            <tr>
+                                <th>Req ID</th>
+                                <th>Student Name</th>
+                                <th>Document</th>
+                                <th>Date Requested</th>
+                                <th>Status</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="main-tbody">
+                            <?php if (empty($mainRows)): ?>
+                                <tr><td colspan="6" class="empty-row">📭 No active requests.</td></tr>
+                            <?php else: foreach ($mainRows as $r) echo renderRow($r, false); endif; ?>
+                        </tbody>
+                    </table>
+                    </div>
+                </div>
+
+                <!-- Request history (released / cancelled) -->
+                <div class="container" id="view-archived" style="display:none;">
+                    <div class="table-header">
+                        <h3>Request History</h3>
+                        <div class="table-header-controls">
+                            <div class="search-wrapper">
+                                <span class="search-icon">🔍</span>
+                                <input type="text" class="search" id="search-archived" placeholder="Search history...">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="filter-chips" id="chips-archived">
+                        <button type="button" class="chip active" data-filter="">All</button>
+                        <button type="button" class="chip" data-filter="Released">✔ Released</button>
+                        <button type="button" class="chip" data-filter="Rejected">🚫 Rejected</button>
+                        <button type="button" class="chip" data-filter="Cancelled">✖ Cancelled</button>
+                    </div>
+                    <div class="tbl-scroll-wrap">
+                    <table class="tbl-x" style="min-width: 1080px;">
+                        <thead>
+                            <tr>
+                                <th>Req ID</th>
+                                <th>Student Name</th>
+                                <th>Document</th>
+                                <th>Date Requested</th>
+                                <th>Date Released</th>
+                                <th>Status</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="archived-tbody">
+                            <?php if (empty($archivedRows)): ?>
+                                <tr><td colspan="7" class="empty-row">📭 No request history yet.</td></tr>
+                            <?php else: foreach ($archivedRows as $r) echo renderRow($r, true); endif; ?>
+                        </tbody>
+                    </table>
+                    </div>
+                </div>
+            </div><!-- /view-requests -->
 
             <!-- ════ VIEW 3: ACCOUNTS (all in one page) ════ -->
             <div id="view-accounts" style="display:<?php echo $activeView === 'accounts' ? 'block' : 'none'; ?>;">
@@ -873,6 +1468,178 @@ if (!function_exists('audit_badge_class')) {
     <script>var CSRF_TOKEN = <?php echo json_encode($csrf); ?>;</script>
     <script src="admin.js"></script>
     <script src="../assets/js/session-timeout.js" defer></script>
+
+    <!-- ══ Reject Reason Modal (adopted from Registrar) ══ -->
+    <div id="reject-modal">
+     <div class="reqmgr">
+      <div class="reject-modal-box">
+        <h3>✖ Reject Request</h3>
+        <p class="reject-modal-sub">The student will see this reason in their request history. Please be specific.</p>
+        <form method="POST" action="adminDashboard.php" id="reject-form">
+            <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(csrf_token()); ?>">
+            <input type="hidden" name="update_status" value="1">
+            <input type="hidden" name="new_status" value="Cancelled">
+            <input type="hidden" name="req_id" id="reject-req-id" value="">
+            <label for="reject-reason-input">Reason for rejection <span style="color:#b33;">*</span></label>
+            <textarea id="reject-reason-input" name="reject_reason" rows="3" maxlength="500" required
+                placeholder="e.g. Incomplete requirements — please attach a valid ID"></textarea>
+            <div class="reject-modal-actions">
+                <button type="button" class="btn-cancel-modal" onclick="closeRejectModal()">Cancel</button>
+                <button type="submit" class="btn-reject">✖ Reject Request</button>
+            </div>
+        </form>
+      </div>
+     </div>
+    </div>
+
+    <!-- ══ Request Details Modal (adopted from Registrar) ══ -->
+    <div id="file-modal">
+     <div class="reqmgr">
+      <div class="modal-box">
+        <div class="modal-header">
+            <div class="modal-title-wrap">
+                <span class="modal-title-icon">📋</span>
+                <div class="modal-title-text">
+                    <span class="modal-title">Request Details</span>
+                    <span class="modal-subtitle" id="modal-req-id">—</span>
+                </div>
+            </div>
+            <button class="modal-close" id="closeFileModal" type="button">✕ Close</button>
+        </div>
+        <div class="modal-scroll">
+            <div class="modal-summary">
+                <div class="ms-cell ms-student">
+                    <span class="ms-avatar" id="ms-avatar"></span>
+                    <div class="ms-fields">
+                        <span class="ms-label">Student</span>
+                        <span class="ms-value" id="ms-student">—</span>
+                    </div>
+                </div>
+                <div class="ms-cell">
+                    <span class="ms-label">Document</span>
+                    <span class="ms-value" id="ms-doc">—</span>
+                </div>
+                <div class="ms-cell">
+                    <span class="ms-label">Date Requested</span>
+                    <span class="ms-value" id="ms-date">—</span>
+                </div>
+                <div class="ms-cell">
+                    <span class="ms-label">Status</span>
+                    <span class="ms-value" id="ms-status-wrap">—</span>
+                </div>
+            </div>
+            <div class="modal-section">
+                <p class="modal-section-label">👤 Student Information</p>
+                <div class="student-info" id="student-info">
+                    <p class="history-loading">Loading…</p>
+                </div>
+            </div>
+            <div class="modal-purpose-box">
+                <p class="modal-section-label">📝 Purpose / Reason</p>
+                <p id="modal-purpose">—</p>
+            </div>
+            <div class="modal-section">
+                <p class="modal-section-label">📎 Submitted Requirements</p>
+                <div class="docs-grid" id="docs-grid"></div>
+            </div>
+            <div class="modal-section">
+                <p class="modal-section-label">🕘 Request History — This Student</p>
+                <div id="content-history" class="history-list">
+                    <p class="history-loading">Loading…</p>
+                </div>
+            </div>
+        </div>
+      </div>
+     </div>
+    </div>
+
+    <!-- ══ Release Modal — system-generated e-certificate (adopted) ══ -->
+    <div id="release-modal">
+     <div class="reqmgr">
+      <div class="modal-box release-box">
+        <div class="modal-header">
+            <div class="modal-title-wrap">
+                <span class="modal-title-icon">📤</span>
+                <div class="modal-title-text">
+                    <span class="modal-title">Release with e-Certificate</span>
+                    <span class="modal-subtitle" id="rel-req-id">—</span>
+                </div>
+            </div>
+            <button class="modal-close" id="closeReleaseModal" type="button">✕ Close</button>
+        </div>
+        <form method="POST" class="release-form">
+            <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(csrf_token(), ENT_QUOTES); ?>">
+            <input type="hidden" name="release_request" value="1">
+            <input type="hidden" name="req_id" id="rel-req-id-input" value="">
+            <div class="release-info">
+                <div><span>Student</span><strong id="rel-student">—</strong></div>
+                <div><span>Document</span><strong id="rel-doc">—</strong></div>
+            </div>
+            <p class="modal-section-label">✏️ Edit the system-generated certificate</p>
+            <div class="release-fields">
+                <div class="rf-group">
+                    <label>Certificate Title</label>
+                    <input type="text" id="rf-title" name="cert_title" maxlength="120">
+                </div>
+                <div class="rf-group rf-date">
+                    <label>Issue Date</label>
+                    <input type="date" id="rf-date" name="cert_date">
+                </div>
+                <div class="rf-group">
+                    <label>Signing Officer</label>
+                    <input type="text" id="rf-officer" name="officer_name" maxlength="100">
+                </div>
+                <div class="rf-group">
+                    <label>Position / Title</label>
+                    <input type="text" id="rf-officer-title" name="officer_title" maxlength="100">
+                </div>
+                <div class="rf-group rf-full">
+                    <label>Certificate Body
+                        <span class="rf-hint">Placeholders: {NAME} {SY} {DATE} {PURPOSE} {LRN} {GRADE}</span>
+                    </label>
+                    <textarea id="rf-body" name="cert_body" rows="4" maxlength="1500"></textarea>
+                </div>
+                <div class="rf-group rf-full">
+                    <label>Additional Remarks <span class="rf-hint">(optional)</span></label>
+                    <textarea id="rf-remarks" name="remarks" rows="2" maxlength="400"></textarea>
+                </div>
+            </div>
+            <p class="modal-section-label">👁 Live Preview</p>
+            <div class="release-preview-wrap">
+                <iframe id="rel-preview" src="about:blank" title="Certificate preview"></iframe>
+            </div>
+            <div class="preview-actions">
+                <button type="button" class="btn-refresh-preview" id="btn-refresh-preview">🔄 Refresh Preview</button>
+                <button type="button" class="btn-refresh-preview btn-full-preview" id="btn-fullscreen-preview"
+                    title="Open the certificate full-size in a new tab">⛶ Fullscreen</button>
+            </div>
+            <p class="release-note">
+                On release, this certificate is <strong>generated as a PDF by the system</strong>,
+                <strong>emailed to the student as an attachment</strong>, and saved to their record
+                (downloadable in their My Requests → History).
+            </p>
+            <button type="submit" class="btn-release-big">✔ Mark as Released &amp; Email Certificate</button>
+        </form>
+      </div>
+     </div>
+    </div>
+
+    <!-- ══ Fullscreen Document Viewer (lightbox, adopted) ══ -->
+    <div id="doc-lightbox">
+     <div class="reqmgr">
+      <div class="lb-bar">
+        <span class="lb-caption" id="lightbox-caption"></span>
+        <div class="lb-bar-actions">
+            <a class="lb-btn" id="lightbox-open" href="#" target="_blank" rel="noopener">↗ Open in New Tab</a>
+            <button class="lb-btn" id="lightbox-close" type="button">✕ Close</button>
+        </div>
+      </div>
+      <div class="lb-stage">
+        <img id="lightbox-img" src="" alt="Document preview">
+        <iframe id="lightbox-frame" src="about:blank" title="PDF preview"></iframe>
+      </div>
+     </div>
+    </div>
 </body>
 
 </html>

@@ -14,7 +14,10 @@ require_once __DIR__ . "/certificate.php";
 // still blocks all external sites from framing it — only our own pages can.
 header('X-Frame-Options: SAMEORIGIN');
 
-if (strtolower($_SESSION['role'] ?? '') !== 'registrar') {
+// Registrar AND Admin may preview/generate certificates — the Admin
+// dashboard mirrors the registrar's request-processing capabilities.
+$role = strtolower($_SESSION['role'] ?? '');
+if ($role !== 'registrar' && $role !== 'admin') {
     http_response_code(403);
     exit('Forbidden');
 }

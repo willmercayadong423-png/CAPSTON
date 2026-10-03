@@ -1225,6 +1225,40 @@ box-shadow:0 6px 18px rgba(0,0,0,.06);
 
     }
 
+    /* ══ Already-requested document: highlighted but read-only ══ */
+    .doc-btn.doc-btn-taken{
+
+        cursor:not-allowed;
+
+        background:#eef1f5;
+
+        border-color:#b9c2cf;
+
+        color:#5b6472;
+
+    }
+
+    .doc-btn.doc-btn-taken:hover{
+
+        border-color:#b9c2cf;
+
+        background:#eef1f5;
+
+    }
+
+    .doc-taken-badge{
+        margin-left:auto;
+        flex-shrink:0;
+        font-size:11px;
+        font-weight:700;
+        letter-spacing:.02em;
+        color:#fff;
+        background:var(--green-mid);
+        border-radius:999px;
+        padding:4px 12px;
+        white-space:nowrap;
+    }
+
 
 
 

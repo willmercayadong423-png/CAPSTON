@@ -87,9 +87,14 @@ if ((int)($glMapAll[$doc_type] ?? 0) === 1 && $glInput === '') {
 // ── Guard: changing the document type must not create a second pending
 // request of the same type (the new-request flow enforces the same rule). ──
 if ($doc_type !== $existing['document_type']) {
+    // One active request per document type: switching this request to a type
+    // the student already has Pending / Processing / Ready for Pickup /
+    // Released is refused (the request being edited is excluded).
     $dup = $conn->prepare(
         "SELECT COUNT(*) AS cnt FROM document_requests
-         WHERE user_id = ? AND document_type = ? AND status = 'Pending' AND id != ?"
+         WHERE user_id = ? AND document_type = ?
+           AND status IN ('Pending','Processing','Ready for Pickup','Released')
+           AND id != ?"
     );
     $dup->bind_param("isi", $student_id, $doc_type, $req_id);
     $dup->execute();

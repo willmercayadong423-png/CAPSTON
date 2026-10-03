@@ -38,6 +38,18 @@ function showView(view) {
 
 function selectDocument(docName) {
 
+    // ── Read-only guard: documents with an existing active request ──
+    // (Pending / Processing / Ready for Pickup / Released). The button is
+    // rendered disabled, but a double guard here protects the sessionStorage
+    // restore path and any stale tab.
+    if (window.ACTIVE_DOC_TYPES
+        && Object.prototype.hasOwnProperty.call(window.ACTIVE_DOC_TYPES, docName)) {
+        backToStep1();
+        alert('You already have a ' + window.ACTIVE_DOC_TYPES[docName]
+            + ' request for "' + docName + '". You can request it again only after it is cancelled or rejected.');
+        return;
+    }
+
     document.getElementById('selected-document-input').value = docName;
     document.getElementById('selected-doc-label').textContent = docName;
 
@@ -297,6 +309,14 @@ function openEditModal(id, docType, purpose, existId, existSy, existGl) {
     if (!found && docType) {
         sel.add(new Option(docType + ' (current)', docType, true, true));
     }
+
+    // One active request per document type: lock every option the student
+    // already has an active request for, EXCEPT this request's own type.
+    Array.prototype.slice.call(sel.options).forEach(function (o) {
+        o.disabled = !!docType && o.value !== docType
+            && !!window.ACTIVE_DOC_TYPES
+            && Object.prototype.hasOwnProperty.call(window.ACTIVE_DOC_TYPES, o.value);
+    });
 
     updateEditReqFields(docType, existGl, existSy);
 
@@ -615,6 +635,16 @@ window.addEventListener('DOMContentLoaded', function () {
         const savedDoc = sessionStorage.getItem('hehms_selected_doc');
 
         if (step === 'form') {
+            // A doc saved in sessionStorage may have become locked (request
+            // submitted in another tab / stale bookmark) — send the student
+            // back to the selection step instead of restoring a taken doc.
+            if (savedDoc && window.ACTIVE_DOC_TYPES
+                && Object.prototype.hasOwnProperty.call(window.ACTIVE_DOC_TYPES, savedDoc)) {
+                sessionStorage.removeItem('hehms_selected_doc');
+                history.replaceState({}, '', '?view=request');
+                return;
+            }
+
             document.getElementById('step-document').style.display = 'none';
             document.getElementById('step-form').style.display = 'block';
 

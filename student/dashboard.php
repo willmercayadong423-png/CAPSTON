@@ -279,20 +279,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_request'])) {
         $pendingCount = $countStmt->get_result()->fetch_assoc()['cnt'];
         $countStmt->close();
 
-        // ── Duplicate check: same document type already pending ──
+        // ── Duplicate check: one active request per document type ─────
+        // A student cannot request the same document again while an earlier
+        // request for it is Pending, Processing, Ready for Pickup (legacy)
+        // or Released. Only Cancelled / Rejected requests free the type up.
         $dupStmt = $conn->prepare(
-            "SELECT COUNT(*) AS cnt FROM document_requests
-             WHERE user_id = ? AND document_type = ? AND status = 'Pending'"
+            "SELECT status FROM document_requests
+             WHERE user_id = ? AND document_type = ?
+               AND status IN ('Pending','Processing','Ready for Pickup','Released')
+             LIMIT 1"
         );
         $dupStmt->bind_param("is", $student_id, $doc_type);
         $dupStmt->execute();
-        $dupCount = $dupStmt->get_result()->fetch_assoc()['cnt'];
+        $dupRow   = $dupStmt->get_result()->fetch_assoc();
         $dupStmt->close();
 
         if ($pendingCount >= 3) {
             $errorMsg = "You already have 3 pending requests. Please wait for one to be processed before submitting a new one.";
-        } elseif ($dupCount > 0) {
-            $errorMsg = "You already have a pending request for \"$doc_type\". Please wait for it to be processed.";
+        } elseif ($dupRow) {
+            $errorMsg = "You already have a {$dupRow['status']} request for \"$doc_type\". "
+                      . 'You can request this document again only after that request is cancelled or rejected.';
         } elseif (!isset($_FILES['id_photo']) || $_FILES['id_photo']['error'] !== UPLOAD_ERR_OK) {
             $errorMsg = "Please upload your Valid ID.";
         } else {
@@ -421,7 +427,7 @@ if (empty($errorMsg) && isset($_GET['error'])) {
         'invalid_doc_type' => 'Please select a valid document type.',
         'sy_required'      => 'Please enter the School Year you last attended (e.g. 2024-2025).',
         'gl_required'      => 'Please enter your Grade Level.',
-        'dup_pending'      => 'You already have a pending request for that document type. Please wait for it to be processed.',
+        'dup_pending'      => 'You already have an active request for that document type (pending, processing, or released). You can request it again only after it is cancelled or rejected.',
         'pending_limit'    => 'Restoring would exceed the 3-pending-request limit. Please wait for one to be processed.',
         'restore_failed'   => 'This request cannot be restored — it was rejected by the registrar and only they can reopen it.',
         'not_found'        => 'That request can no longer be edited — it may have already been processed.',
@@ -448,6 +454,17 @@ foreach ($myRequests as $r) {
 }
 
 $cntTotal   = count($myRequests);
+
+// ── Document types this student already has an ACTIVE request for ──
+// Pending / Processing / Ready for Pickup (legacy) / Released lock the
+// document type: the request-form card and the edit-modal option render
+// highlighted-but-read-only, mirroring the server-side duplicate rule.
+$activeDocTypes = [];
+foreach ($myRequests as $r) {
+    if (in_array($r['status'], ['Pending', 'Processing', 'Ready for Pickup', 'Released'], true)) {
+        $activeDocTypes[$r['document_type']] = $r['status'];
+    }
+}
 $cntPending = 0;
 $cntReleased = 0;
 $cntProcessing = 0;
@@ -751,7 +768,7 @@ $avatarInitials = strtoupper(substr($student['first_name'], 0, 1) . substr($stud
    class="nav-main-item <?php echo $activeView === 'request' ? 'active' : ''; ?>">
     <div class="nmi-icon">📝</div>
     <div class="nmi-text">
-        <div class="nmi-title">Request</div>
+        <div class="nmi-title">Request Document</div>
        
     </div>
 </a>
@@ -1135,7 +1152,8 @@ $avatarInitials = strtoupper(substr($student['first_name'], 0, 1) . substr($stud
         <ul class="note-list">
             <li>Only the documents listed below can be requested online.</li>
             <li>You may have a maximum of 3 pending requests at a time.</li>
-            <li>You cannot submit a new request for a document type while a previous request for it is still pending.</li>
+            <li>Once you request a document, it is locked (even after release) — you cannot request it again until that request is cancelled.</li>
+            <li>Documents you already requested are highlighted with their current status and cannot be selected.</li>
         </ul>
     </p>
 
@@ -1145,11 +1163,20 @@ $avatarInitials = strtoupper(substr($student['first_name'], 0, 1) . substr($stud
 </div>
 
           <div class="document-grid">
-    <?php foreach ($documentTypes as $dt): ?>
-        <button type="button" class="doc-btn"
-            onclick="selectDocument('<?php echo htmlspecialchars($dt, ENT_QUOTES); ?>')">
-            📄 <?php echo htmlspecialchars($dt); ?>
-        </button>
+    <?php foreach ($documentTypes as $dt):
+        $takenStatus = $activeDocTypes[$dt] ?? null; ?>
+        <?php if ($takenStatus): ?>
+            <button type="button" class="doc-btn doc-btn-taken" disabled
+                title="You already have a <?= htmlspecialchars($takenStatus) ?> request for this document.">
+                <span class="doc-btn-label">📄 <?= htmlspecialchars($dt) ?></span>
+                <span class="doc-taken-badge">✔ <?= htmlspecialchars($takenStatus) ?></span>
+            </button>
+        <?php else: ?>
+            <button type="button" class="doc-btn"
+                onclick="selectDocument('<?= htmlspecialchars($dt, ENT_QUOTES) ?>')">
+                <span class="doc-btn-label">📄 <?= htmlspecialchars($dt) ?></span>
+            </button>
+        <?php endif; ?>
     <?php endforeach; ?>
 </div>
 <br>
@@ -1743,6 +1770,7 @@ function clearAvatar() {
     <!-- Which documents ask for the Grade Level (from the DB, admin-managed
          per document) — must load BEFORE dashb.js, which reads it at parse time -->
     <script>window.DOC_GL_MAP = <?php echo json_encode($docGlMap, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;</script>
+    <script>window.ACTIVE_DOC_TYPES = <?php echo json_encode($activeDocTypes, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;</script>
     <script src="dashb.js"></script>
     <script src="../assets/js/session-timeout.js" defer></script>
     <script>

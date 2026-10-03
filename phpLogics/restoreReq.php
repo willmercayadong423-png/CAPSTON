@@ -120,7 +120,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'
         }
     }
 
-    header("Location: ../student/dashboard.php?view=requests&tab=main&restore_success=1");
+    // ── Redirect with the REAL outcome: only a genuine restore reports
+    // success. A refused restore (e.g. registrar-rejected, or the row
+    // vanished) sends the student back to the archive tab with an
+    // explanatory message instead of a misleading "restored" flash.
+    if ($restored) {
+        header("Location: ../student/dashboard.php?view=requests&tab=main&restore_success=1");
+    } else {
+        header("Location: ../student/dashboard.php?view=requests&tab=archived&error=restore_failed");
+    }
     exit();
 }
 

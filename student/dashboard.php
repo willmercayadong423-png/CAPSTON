@@ -401,7 +401,12 @@ if (!in_array($id_ext, $allowed_ext, true)) {
 
 // ── Announcements (admin-managed) ──────────────────────────────
 $annStmt = $conn->query(
-    "SELECT title, message, created_at FROM announcements WHERE is_active = 1 ORDER BY created_at DESC LIMIT 5"
+    "SELECT a.id, a.title, a.message, a.created_at,
+            CONCAT(u.first_name, ' ', u.last_name) AS author_name
+     FROM announcements a
+     LEFT JOIN users u ON a.created_by = u.id
+     WHERE a.is_active = 1
+     ORDER BY a.created_at DESC LIMIT 20"
 );
 $announcements = $annStmt ? $annStmt->fetch_all(MYSQLI_ASSOC) : [];
 
@@ -418,6 +423,7 @@ if (empty($errorMsg) && isset($_GET['error'])) {
         'gl_required'      => 'Please enter your Grade Level.',
         'dup_pending'      => 'You already have a pending request for that document type. Please wait for it to be processed.',
         'pending_limit'    => 'Restoring would exceed the 3-pending-request limit. Please wait for one to be processed.',
+        'restore_failed'   => 'This request cannot be restored — it was rejected by the registrar and only they can reopen it.',
         'not_found'        => 'That request can no longer be edited — it may have already been processed.',
         'db_fail'          => 'Something went wrong. Please try again.',
         default            => 'An error occurred. Please try again.',
@@ -457,6 +463,128 @@ foreach ($myRequests as $r) {
         else                                               $cntCancelled++;
     }
 }
+
+// ── Compile Notifications (Announcements + Request Status Updates) ──
+$notifications = [];
+
+// 1 · Admin Announcements
+foreach ($announcements as $ann) {
+    $createdTime = strtotime($ann['created_at']);
+    $notifications[] = [
+        'id'               => 'ann_' . ($ann['id'] ?? md5($ann['title'] . $ann['created_at'])),
+        'type'             => 'announcement',
+        'title'            => $ann['title'],
+        'body'             => $ann['message'],
+        'time'             => $createdTime,
+        'date_str'         => date('M d, Y · h:i A', $createdTime),
+        'badge'            => 'Announcement',
+        'badge_cls'        => 'badge-announcement',
+        'icon'             => '📢',
+        'rejection_reason' => null,
+        'req_id'           => null,
+        'e_cert'           => false,
+    ];
+}
+
+// 2 · Student Request Status Updates
+foreach ($myRequests as $r) {
+    $reqNo   = 'REQ-' . str_pad((string)$r['id'], 4, '0', STR_PAD_LEFT);
+    $docType = $r['document_type'];
+    $status  = $r['status'];
+    $byReg   = (trim($r['cancelled_by'] ?? '') === 'registrar');
+
+    if ($status === 'Pending') {
+        $reqTime = strtotime($r['date_requested'] ?? 'now');
+        $notifications[] = [
+            'id'               => 'req_' . $r['id'] . '_pending',
+            'type'             => 'request',
+            'title'            => "Request Submitted: {$docType}",
+            'body'             => "Your request #{$reqNo} for \"{$docType}\" was submitted and is pending review by the Registrar.",
+            'time'             => $reqTime,
+            'date_str'         => date('M d, Y · h:i A', $reqTime),
+            'badge'            => 'Pending Review',
+            'badge_cls'        => 'badge-pending',
+            'icon'             => '⏳',
+            'rejection_reason' => null,
+            'req_id'           => $r['id'],
+            'e_cert'           => false,
+        ];
+    } elseif ($status === 'Processing') {
+        $procTime = strtotime($r['updated_at'] ?? 'now');
+        $notifications[] = [
+            'id'               => 'req_' . $r['id'] . '_processing',
+            'type'             => 'request',
+            'title'            => "Request Processing: {$docType}",
+            'body'             => "Your request #{$reqNo} for \"{$docType}\" has been accepted and is currently being processed by the Registrar.",
+            'time'             => $procTime,
+            'date_str'         => date('M d, Y · h:i A', $procTime),
+            'badge'            => 'Processing',
+            'badge_cls'        => 'badge-processing',
+            'icon'             => '⚙️',
+            'rejection_reason' => null,
+            'req_id'           => $r['id'],
+            'e_cert'           => false,
+        ];
+    } elseif ($status === 'Released') {
+        $relTime = !empty($r['date_released']) ? strtotime($r['date_released']) : strtotime($r['updated_at'] ?? 'now');
+        $hasCert = !empty($r['e_certificate']);
+        $notifications[] = [
+            'id'               => 'req_' . $r['id'] . '_released',
+            'type'             => 'request',
+            'title'            => "Document Released: {$docType}",
+            'body'             => "Your request #{$reqNo} for \"{$docType}\" has been approved and issued." . ($hasCert ? " You can download your official e-Certificate now." : ""),
+            'time'             => $relTime,
+            'date_str'         => date('M d, Y · h:i A', $relTime),
+            'badge'            => 'Released',
+            'badge_cls'        => 'badge-released',
+            'icon'             => '🎓',
+            'rejection_reason' => null,
+            'req_id'           => $r['id'],
+            'e_cert'           => $hasCert,
+        ];
+    } elseif ($status === 'Cancelled') {
+        $canTime = strtotime($r['updated_at'] ?? 'now');
+        if ($byReg) {
+            $reason = trim((string)($r['rejection_reason'] ?? ''));
+            $notifications[] = [
+                'id'               => 'req_' . $r['id'] . '_rejected',
+                'type'             => 'request',
+                'title'            => "Request Rejected: {$docType}",
+                'body'             => "Your request #{$reqNo} for \"{$docType}\" was rejected by the Registrar.",
+                'time'             => $canTime,
+                'date_str'         => date('M d, Y · h:i A', $canTime),
+                'badge'            => 'Rejected',
+                'badge_cls'        => 'badge-rejected',
+                'icon'             => '❌',
+                'rejection_reason' => $reason ?: null,
+                'req_id'           => $r['id'],
+                'e_cert'           => false,
+            ];
+        } else {
+            $notifications[] = [
+                'id'               => 'req_' . $r['id'] . '_cancelled',
+                'type'             => 'request',
+                'title'            => "Request Cancelled: {$docType}",
+                'body'             => "You cancelled your request #{$reqNo} for \"{$docType}\".",
+                'time'             => $canTime,
+                'date_str'         => date('M d, Y · h:i A', $canTime),
+                'badge'            => 'Cancelled',
+                'badge_cls'        => 'badge-cancelled',
+                'icon'             => '🚫',
+                'rejection_reason' => null,
+                'req_id'           => $r['id'],
+                'e_cert'           => false,
+            ];
+        }
+    }
+}
+
+// Sort notifications newest first
+usort($notifications, function ($a, $b) {
+    return $b['time'] <=> $a['time'];
+});
+
+$totalNotifs = count($notifications);
 
 function badgeClass($status, $cancelledBy = '')
 {
@@ -529,22 +657,40 @@ $avatarInitials = strtoupper(substr($student['first_name'], 0, 1) . substr($stud
     <div class="header-avatar-wrapper">
 
       <div class="header-avatar"
-     onclick="toggleProfileMenu(event)"
-     style="cursor:pointer;">
-    <?php if ($profilePhoto): ?>
-        <img src="<?php echo htmlspecialchars($profilePhotoUrl); ?>" alt="avatar">
-    <?php else: ?>
-        <?php echo $avatarInitials; ?>
-    <?php endif; ?>
-</div>
+           onclick="toggleProfileMenu(event)"
+           style="cursor:pointer;"
+           title="Account, Notifications & Options">
+        <?php if ($profilePhoto): ?>
+            <img src="<?php echo htmlspecialchars($profilePhotoUrl); ?>" alt="avatar">
+        <?php else: ?>
+            <?php echo $avatarInitials; ?>
+        <?php endif; ?>
+        <?php if ($totalNotifs > 0): ?>
+            <span class="avatar-badge" id="avatarNotifBadge" title="<?php echo $totalNotifs; ?> notifications"><?php echo $totalNotifs > 99 ? '99+' : $totalNotifs; ?></span>
+        <?php endif; ?>
+      </div>
 
         <div class="profile-dropdown" id="profileDropdown">
-            <a href="#" onclick="showView('account'); closeProfileMenu();">
-                👤 Account Information
+            <div class="profile-dropdown-user">
+                <div class="pdu-name"><?php echo $studentName; ?></div>
+                <div class="pdu-id">Student ID: <?php echo htmlspecialchars($student['student_id'] ?? '—'); ?></div>
+            </div>
+            <div class="profile-dropdown-divider"></div>
+            <a href="#" onclick="showView('account'); closeProfileMenu();" class="profile-dropdown-item">
+                <span class="pdi-icon">👤</span>
+                <span class="pdi-label">Account Information</span>
             </a>
-
-            <a href="../phpLogics/Logout.php">
-                🚪 Logout
+            <a href="#" onclick="showView('notifications'); closeProfileMenu();" class="profile-dropdown-item notif-dropdown-item">
+                <span class="pdi-icon">🔔</span>
+                <span class="pdi-label">Notifications</span>
+                <?php if ($totalNotifs > 0): ?>
+                    <span class="pdi-badge" id="dropdownNotifBadge"><?php echo $totalNotifs > 99 ? '99+' : $totalNotifs; ?></span>
+                <?php endif; ?>
+            </a>
+            <div class="profile-dropdown-divider"></div>
+            <a href="../phpLogics/Logout.php" class="profile-dropdown-item pdi-logout">
+                <span class="pdi-icon">🚪</span>
+                <span class="pdi-label">Logout</span>
             </a>
         </div>
 
@@ -609,6 +755,17 @@ $avatarInitials = strtoupper(substr($student['first_name'], 0, 1) . substr($stud
        
     </div>
 </a>
+                <a onclick="showView('notifications')" id="nav-notifications"
+                    class="nav-main-item <?php echo $activeView === 'notifications' ? 'active' : ''; ?>">
+                    <div class="nmi-icon">🔔</div>
+                    <div class="nmi-text">
+                        <div class="nmi-title">Notifications</div>
+                    </div>
+                    <?php if ($totalNotifs > 0): ?>
+                        <span class="sidebar-notif-pill" id="sidebarNotifPill"><?php echo $totalNotifs > 99 ? '99+' : $totalNotifs; ?></span>
+                    <?php endif; ?>
+                </a>
+
                 <a onclick="showView('account')" id="nav-account"
                     class="nav-main-item records <?php echo $activeView === 'account' ? 'active' : ''; ?>">
                     <div class="nmi-icon">👤</div>
@@ -1208,6 +1365,114 @@ $avatarInitials = strtoupper(substr($student['first_name'], 0, 1) . substr($stud
         </form>
     </div>
 </div><!-- /view-account -->
+
+<!-- ════ VIEW 5: NOTIFICATIONS ════ -->
+<div id="view-notifications" style="display:<?php echo $activeView === 'notifications' ? 'block' : 'none'; ?>;">
+
+    <div class="page-banner">
+        <div class="page-banner-icon">🔔</div>
+        <div class="page-banner-content">
+            <h1>Notifications <span>& Updates</span></h1>
+            <p>Stay updated on new school announcements and the real-time status of your credential requests.</p>
+        </div>
+    </div>
+
+    <!-- Notification Toolbar: Category Filters & Actions -->
+    <div class="notif-toolbar">
+        <div class="notif-filter-pills">
+            <button type="button" class="notif-pill active" onclick="filterNotifs('all', this)">
+                All Updates <span class="notif-pill-count" id="count-all"><?php echo count($notifications); ?></span>
+            </button>
+            <button type="button" class="notif-pill" onclick="filterNotifs('announcement', this)">
+                📢 Announcements <span class="notif-pill-count" id="count-ann"><?php echo count(array_filter($notifications, fn($n) => $n['type'] === 'announcement')); ?></span>
+            </button>
+            <button type="button" class="notif-pill" onclick="filterNotifs('request', this)">
+                📋 Request Status <span class="notif-pill-count" id="count-req"><?php echo count(array_filter($notifications, fn($n) => $n['type'] === 'request')); ?></span>
+            </button>
+        </div>
+
+        <div class="notif-toolbar-actions">
+            <button type="button" class="btn-mark-all-read" onclick="markAllNotifsAsRead()">
+                ✓ Mark all as read
+            </button>
+        </div>
+    </div>
+
+    <!-- Notifications List -->
+    <div class="notif-list-container">
+        <?php if (empty($notifications)): ?>
+            <div class="notif-empty-state">
+                <div class="notif-empty-icon">🔔</div>
+                <h3>No Notifications Yet</h3>
+                <p>When the school administration publishes announcements or your request status changes, you'll see them listed here.</p>
+                <button type="button" class="btn-go-dash" onclick="showView('dashboard')">Back to Dashboard</button>
+            </div>
+        <?php else: ?>
+            <div class="notif-cards-grid" id="notifCardsGrid">
+                <?php foreach ($notifications as $n): ?>
+                    <div class="notif-card notif-type-<?php echo htmlspecialchars($n['type']); ?>"
+                         data-type="<?php echo htmlspecialchars($n['type']); ?>"
+                         data-id="<?php echo htmlspecialchars($n['id']); ?>"
+                         data-time="<?php echo (int)$n['time']; ?>">
+
+                        <div class="notif-card-icon-wrap <?php echo htmlspecialchars($n['badge_cls']); ?>">
+                            <span class="notif-card-icon"><?php echo $n['icon']; ?></span>
+                        </div>
+
+                        <div class="notif-card-body">
+                            <div class="notif-card-header">
+                                <div class="notif-card-tags">
+                                    <span class="notif-badge <?php echo htmlspecialchars($n['badge_cls']); ?>">
+                                        <?php echo htmlspecialchars($n['badge']); ?>
+                                    </span>
+                                    <?php if ($n['type'] === 'announcement'): ?>
+                                        <span class="notif-source-tag">School Announcement</span>
+                                    <?php else: ?>
+                                        <span class="notif-source-tag">Credential Request</span>
+                                    <?php endif; ?>
+                                </div>
+                                <span class="notif-time" title="<?php echo htmlspecialchars($n['date_str']); ?>">
+                                    🕒 <?php echo htmlspecialchars($n['date_str']); ?>
+                                </span>
+                            </div>
+
+                            <h3 class="notif-card-title"><?php echo htmlspecialchars($n['title']); ?></h3>
+
+                            <div class="notif-card-text">
+                                <?php echo nl2br(htmlspecialchars($n['body'])); ?>
+                            </div>
+
+                            <?php if (!empty($n['rejection_reason'])): ?>
+                                <div class="notif-rejection-callout">
+                                    <strong>Registrar's Note:</strong> <?php echo htmlspecialchars($n['rejection_reason']); ?>
+                                </div>
+                            <?php endif; ?>
+
+                            <div class="notif-card-actions">
+                                <?php if ($n['type'] === 'announcement'): ?>
+                                    <button type="button" class="notif-action-btn primary" onclick="showView('dashboard')">
+                                        View Dashboard Bulletin ➔
+                                    </button>
+                                <?php elseif ($n['type'] === 'request'): ?>
+                                    <?php if (!empty($n['e_cert'])): ?>
+                                        <a href="../phpLogics/downloadCert.php?req_id=<?php echo (int)$n['req_id']; ?>" class="notif-action-btn success">
+                                            🎓 Download e-Certificate
+                                        </a>
+                                    <?php endif; ?>
+                                    <button type="button" class="notif-action-btn secondary" onclick="showView('requests')">
+                                        Track in My Requests ➔
+                                    </button>
+                                <?php endif; ?>
+                            </div>
+                        </div>
+
+                    </div>
+                <?php endforeach; ?>
+            </div>
+        <?php endif; ?>
+    </div>
+
+</div><!-- /view-notifications -->
 
 <style>
 .verify-badge {

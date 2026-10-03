@@ -73,6 +73,13 @@ try {
             audit_log($conn, 'ANNOUNCEMENT_TOGGLED', 'announcement', (string)$id,
                 $ann ? "{$state}: {$ann['title']}" : "Toggle attempted (announcement no longer exists)");
 
+            if (!$ann) {
+                // No row matched — report failure instead of a hollow success
+                // (e.g. the announcement was deleted in another tab).
+                echo json_encode(['success' => false, 'message' => 'Announcement not found. It may have already been deleted.']);
+                exit;
+            }
+
             echo json_encode(['success' => true]);
             exit;
 
@@ -86,13 +93,19 @@ try {
             $title = (string)($q->get_result()->fetch_row()[0] ?? '');
             $q->close();
 
+            if ($title === '') {
+                // No row matched — nothing was deleted; don't claim success
+                echo json_encode(['success' => false, 'message' => 'Announcement not found. It may have already been deleted.']);
+                exit;
+            }
+
             $del = $conn->prepare("DELETE FROM announcements WHERE id = ?");
             $del->bind_param("i", $id);
             $del->execute();
             $del->close();
 
             audit_log($conn, 'ANNOUNCEMENT_DELETED', 'announcement', (string)$id,
-                $title !== '' ? "Announcement deleted: {$title}" : 'Announcement deleted (not found)');
+                "Announcement deleted: {$title}");
 
             echo json_encode(['success' => true]);
             exit;

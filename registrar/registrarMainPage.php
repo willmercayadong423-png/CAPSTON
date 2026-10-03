@@ -137,11 +137,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['release_request'])) {
     $stu = $q->get_result()->fetch_assoc();
     $q->close();
 
+    $mailSent = false;
     if ($stu && !empty($stu['email'])) {
         $fullName = trim($stu['first_name'] . ' ' . $stu['last_name']);
         $reqNo    = $certData['req_no'];
         $result   = send_certificate_email($stu['email'], $fullName, $reqNo, $row['document_type'], $certWeb);
-        if (!$result['ok']) {
+        $mailSent = $result['ok'];
+        if (!$mailSent) {
             error_log("Release mail failed for {$reqNo}: " . $result['error']);
         }
     } else {
@@ -149,9 +151,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['release_request'])) {
     }
 
     // ── Audit: registrar released the document with a system e-cert ──
+    // The wording reflects the REAL mail outcome — the audit must never
+    // claim an email was sent when the delivery actually failed.
     audit_log($conn, 'CERTIFICATE_RELEASED', 'document_request', $certData['req_no'],
         "{$row['document_type']} — e-certificate generated"
-        . (($stu && !empty($stu['email'])) ? " and emailed to {$stu['email']}" : ' (no email on file — NOT emailed)'));
+        . (($stu && !empty($stu['email']))
+            ? ($mailSent ? " and emailed to {$stu['email']}"
+                         : " — email to {$stu['email']} FAILED (certificate is still downloadable from the dashboard)")
+            : ' (no email on file — NOT emailed)'));
 
     header("Location: registrarMainPage.php?released=1");
     exit();

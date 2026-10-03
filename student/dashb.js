@@ -5,22 +5,17 @@
 /* ── Sidebar view switcher ── */
 function showView(view) {
 
-    document.getElementById('view-dashboard').style.display =
-        (view === 'dashboard') ? 'block' : 'none';
-
-    document.getElementById('view-request').style.display =
-        (view === 'request') ? 'block' : 'none';
-
-    document.getElementById('view-requests').style.display =
-        (view === 'requests') ? 'block' : 'none';
-
-    document.getElementById('view-account').style.display =
-        (view === 'account') ? 'block' : 'none';
-
-    document.getElementById('nav-dashboard').classList.toggle('active', view === 'dashboard');
-    document.getElementById('nav-request').classList.toggle('active', view === 'request');
-    document.getElementById('nav-requests').classList.toggle('active', view === 'requests');
-    document.getElementById('nav-account').classList.toggle('active', view === 'account');
+    const views = ['dashboard', 'request', 'requests', 'account', 'notifications'];
+    views.forEach(function (v) {
+        const el = document.getElementById('view-' + v);
+        if (el) {
+            el.style.display = (view === v) ? 'block' : 'none';
+        }
+        const nav = document.getElementById('nav-' + v);
+        if (nav) {
+            nav.classList.toggle('active', view === v);
+        }
+    });
 
     const params = new URLSearchParams(window.location.search);
     const step = params.get("step");
@@ -32,6 +27,13 @@ function showView(view) {
     }
 
     history.replaceState({}, "", url);
+
+    if (view === 'notifications') {
+        if (typeof initNotificationsReadState === 'function') {
+            initNotificationsReadState();
+        }
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
 }
 
 function selectDocument(docName) {
@@ -491,6 +493,114 @@ document.addEventListener("click", function(e) {
 });
 
 
+/* ══════════ NOTIFICATIONS LOGIC ══════════ */
+function filterNotifs(type, btn) {
+    const pills = document.querySelectorAll('.notif-pill');
+    pills.forEach(function (p) { p.classList.remove('active'); });
+    if (btn) btn.classList.add('active');
+
+    const cards = document.querySelectorAll('.notif-card');
+    let visibleCount = 0;
+
+    cards.forEach(function (card) {
+        const cType = card.dataset.type;
+        if (type === 'all' || cType === type) {
+            card.style.display = 'flex';
+            visibleCount++;
+        } else {
+            card.style.display = 'none';
+        }
+    });
+
+    let emptyCategory = document.getElementById('notif-category-empty');
+    const container = document.getElementById('notifCardsGrid');
+    if (!emptyCategory && container) {
+        emptyCategory = document.createElement('div');
+        emptyCategory.id = 'notif-category-empty';
+        emptyCategory.className = 'notif-empty-state';
+        emptyCategory.style.padding = '40px 20px';
+        emptyCategory.innerHTML = '<div class="notif-empty-icon">📭</div><h3>No notifications found</h3><p>There are no notifications matching this filter.</p>';
+        container.appendChild(emptyCategory);
+    }
+    if (emptyCategory) {
+        emptyCategory.style.display = (visibleCount === 0) ? 'block' : 'none';
+    }
+}
+
+function markAllNotifsAsRead() {
+    const now = Date.now();
+    localStorage.setItem('hehms_student_notif_last_seen', now.toString());
+
+    // Visually unmark unread state
+    document.querySelectorAll('.notif-card.is-unread').forEach(function (card) {
+        card.classList.remove('is-unread');
+    });
+
+    // Clear / hide badges
+    const avatarBadge = document.getElementById('avatarNotifBadge');
+    if (avatarBadge) avatarBadge.style.display = 'none';
+
+    const dropdownBadge = document.getElementById('dropdownNotifBadge');
+    if (dropdownBadge) dropdownBadge.style.display = 'none';
+
+    const sidebarPill = document.getElementById('sidebarNotifPill');
+    if (sidebarPill) sidebarPill.style.display = 'none';
+
+    const btn = document.querySelector('.btn-mark-all-read');
+    if (btn) {
+        const origText = btn.innerHTML;
+        btn.innerHTML = '✓ All marked as read';
+        btn.disabled = true;
+        setTimeout(function () {
+            btn.innerHTML = origText;
+            btn.disabled = false;
+        }, 2000);
+    }
+}
+
+function initNotificationsReadState() {
+    const lastSeenStr = localStorage.getItem('hehms_student_notif_last_seen');
+    const lastSeen = lastSeenStr ? parseInt(lastSeenStr, 10) : 0;
+
+    let unreadCount = 0;
+    const cards = document.querySelectorAll('.notif-card');
+
+    cards.forEach(function (card) {
+        const timeSec = parseInt(card.dataset.time || '0', 10);
+        const timeMs = timeSec * 1000;
+        if (timeMs > lastSeen) {
+            card.classList.add('is-unread');
+            unreadCount++;
+        } else {
+            card.classList.remove('is-unread');
+        }
+    });
+
+    const avatarBadge = document.getElementById('avatarNotifBadge');
+    const dropdownBadge = document.getElementById('dropdownNotifBadge');
+    const sidebarPill = document.getElementById('sidebarNotifPill');
+
+    if (unreadCount === 0) {
+        if (avatarBadge) avatarBadge.style.display = 'none';
+        if (dropdownBadge) dropdownBadge.style.display = 'none';
+        if (sidebarPill) sidebarPill.style.display = 'none';
+    } else {
+        const displayVal = unreadCount > 99 ? '99+' : unreadCount;
+        if (avatarBadge) {
+            avatarBadge.textContent = displayVal;
+            avatarBadge.style.display = 'block';
+        }
+        if (dropdownBadge) {
+            dropdownBadge.textContent = displayVal;
+            dropdownBadge.style.display = 'inline-block';
+        }
+        if (sidebarPill) {
+            sidebarPill.textContent = displayVal;
+            sidebarPill.style.display = 'inline-block';
+        }
+    }
+}
+
 window.addEventListener('DOMContentLoaded', function () {
 
     const params = new URLSearchParams(window.location.search);
@@ -498,6 +608,7 @@ window.addEventListener('DOMContentLoaded', function () {
     const step = params.get('step');
 
     showView(view);
+    initNotificationsReadState();
 
     if (view === 'request') {
 

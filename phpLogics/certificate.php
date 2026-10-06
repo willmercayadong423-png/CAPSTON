@@ -28,13 +28,15 @@ require_once __DIR__ . '/../vendor/autoload.php';
 function certificate_fetch(mysqli $conn, int $req_id): ?array
 {
     $q = $conn->prepare(
-        "SELECT dr.id AS req_id, dr.document_type, dr.purpose, dr.date_requested,
+        "SELECT dr.id AS req_id, dt.name AS document_type, dr.purpose, dr.date_requested,
                 dr.e_certificate, dr.grade_level AS req_grade_level,
                 dr.school_year_last_attended AS req_school_year,
-                s.id AS student_pk, s.student_id AS school_id,
-                s.first_name, s.last_name, s.lrn
+                s.id AS student_pk, sp.student_id AS school_id,
+                s.first_name, s.last_name, sp.lrn
          FROM document_requests dr
+         JOIN document_types dt ON dt.id = dr.document_type_id
          JOIN users s ON dr.user_id = s.id
+         LEFT JOIN student_profiles sp ON sp.user_id = s.id
          WHERE dr.id = ?"
     );
     $q->bind_param("i", $req_id);

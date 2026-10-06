@@ -26,10 +26,12 @@ $action = $_REQUEST['action'] ?? '';
 /* ── GET · list (read-only) ───────────────────────────────────────── */
 if ($_SERVER['REQUEST_METHOD'] === 'GET' && $action === 'list') {
     ensure_document_types_table($conn);
+    // Never cache — the admin must always see the live list after a toggle
+    header('Cache-Control: no-store, max-age=0');
     $res = $conn->query(
         "SELECT dt.id, dt.name, dt.requires_grade_level, dt.is_active,
                 (SELECT COUNT(*) FROM document_requests dr
-                 WHERE dr.document_type = dt.name) AS usage_count
+                 WHERE dr.document_type_id = dt.id) AS usage_count
          FROM document_types dt
          ORDER BY dt.is_active DESC, dt.sort_order, dt.name"
     );
@@ -138,8 +140,8 @@ switch ($action) {
 
         // Never hard-delete a type that has request history — deactivate it
         // instead so old rows keep showing the right document name.
-        $c = $conn->prepare("SELECT COUNT(*) FROM document_requests WHERE document_type = ?");
-        $c->bind_param("s", $name);
+        $c = $conn->prepare("SELECT COUNT(*) FROM document_requests WHERE document_type_id = ?");
+        $c->bind_param("i", $id);
         $c->execute();
         $used = (int)$c->get_result()->fetch_row()[0];
         $c->close();

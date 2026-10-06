@@ -129,13 +129,13 @@ function saveSettings() {
                 setTimeout(function () { location.reload(); }, 800);
             } else {
                 btn.disabled = false;
-                btn.textContent = '💾 Save Settings';
+                btn.textContent = 'Saving…';
                 showToast(data.message || 'Failed to save settings.', 'error');
             }
         })
         .catch(function () {
             btn.disabled = false;
-            btn.textContent = '💾 Save Settings';
+            btn.textContent = 'Saving…';
             showToast('Network error. Please try again.', 'error');
         });
 }
@@ -161,13 +161,13 @@ function saveInfo() {
                 setTimeout(function () { location.reload(); }, 800);
             } else {
                 btn.disabled = false;
-                btn.textContent = '💾 Save Information';
+                btn.textContent = 'Saving…';
                 showToast(data.message || 'Failed to save information.', 'error');
             }
         })
         .catch(function () {
             btn.disabled = false;
-            btn.textContent = '💾 Save Information';
+            btn.textContent = 'Saving…';
             showToast('Network error. Please try again.', 'error');
         });
 }
@@ -177,7 +177,9 @@ function loadDocTypes() {
     var box = document.getElementById('doc-type-list');
     if (!box) return;
 
-    fetch('../phpLogics/documentTypeAction.php?action=list')
+    /* cache:'no-store' — without it the browser may serve the cached list
+       after a toggle, making Remove/Restore LOOK like they did nothing. */
+    fetch('../phpLogics/documentTypeAction.php?action=list', { cache: 'no-store' })
         .then(function (r) { return r.json(); })
         .then(function (data) {
             if (data.success) renderDocTypes(data.items || []);
@@ -193,11 +195,14 @@ function renderDocTypes(items) {
     if (!box) return;
 
     if (!items.length) {
-        box.innerHTML = '<div class="empty-state"><div class="empty-icon">📄</div>' +
+        box.innerHTML = '<div class="empty-state"><div class="empty-icon">' + svgIcon('file-text', 26) + '</div>' +
             '<p>No documents yet — students cannot request anything until one is added.</p></div>';
         return;
     }
 
+    /* Buttons carry data-* attributes and ONE delegated listener handles
+       them (see bindDocTypeActions). No inline onclick — names with quotes
+       used to break the attribute and kill the click. */
     var html = '';
     items.forEach(function (it) {
         var id      = parseInt(it.id, 10);
@@ -205,24 +210,58 @@ function renderDocTypes(items) {
         var needsGl = parseInt(it.requires_grade_level, 10) === 1;
         var used    = parseInt(it.usage_count, 10) || 0;
 
+        var actions = active
+            ? '<button type="button" class="btn-cancel-req" data-doc-action="remove" data-id="' + id + '">' + svgIcon('x-circle', 12) + ' Remove</button>'
+            : '<button type="button" class="btn-edit" data-doc-action="restore" data-id="' + id + '">' + svgIcon('restore', 12) + ' Restore</button>';
+        /* Delete is available whenever the document has NEVER been requested —
+           active or removed alike (restoring must not hide the delete option).
+           Documents WITH history show a disabled Delete + tooltip so admins
+           see WHY instead of the button just being missing. */
+        if (used === 0) {
+            actions += '<button type="button" class="btn-cancel-req" data-doc-action="delete" data-id="' + id + '" data-name="' + escapeAttr(it.name) + '">' + svgIcon('trash', 12) + ' Delete</button>';
+        } else {
+            actions += '<button type="button" class="btn-cancel-req" disabled title="Cannot be deleted — ' + used + ' request' + (used === 1 ? '' : 's') + ' in the history use this document. Use Remove instead (it hides the document but keeps every past request intact)." style="opacity:.45; cursor:not-allowed;">' + svgIcon('trash', 12) + ' Delete</button>';
+        }
+
         html += '<div class="doc-item' + (active ? '' : ' inactive') + '">' +
-                '<span class="doc-item-name">📄 ' + escapeHtml(it.name) + '</span>' +
+                '<span class="doc-item-name">' + svgIcon('file-text', 14) + ' ' + escapeHtml(it.name) + '</span>' +
                 '<span class="doc-chip ' + (active ? 'active' : 'inactive') + '">' + (active ? 'Active' : 'Removed') + '</span>' +
                 (needsGl ? '<span class="doc-chip gl" title="The request form asks for the Grade Level">+ Grade Level</span>' : '') +
                 '<span class="doc-usage">' + used + ' request' + (used === 1 ? '' : 's') + '</span>' +
-                '<span class="doc-item-actions">' +
-                    (active
-                        ? '<button type="button" class="btn-cancel-req" onclick="toggleDocType(' + id + ', \'remove\')">📦 Remove</button>'
-                        : '<button type="button" class="btn-edit" onclick="toggleDocType(' + id + ', \'restore\')">♻️ Restore</button>') +
-                    (used === 0
-                        ? '<button type="button" class="btn-cancel-req" onclick="deleteDocType(' + id + ', ' + JSON.stringify(it.name) + ')">🗑 Delete</button>'
-                        : '') +
-                '</span>' +
+                '<span class="doc-item-actions">' + actions + '</span>' +
             '</div>';
     });
 
     box.innerHTML = html;
 }
+
+/* One delegated listener for every Remove / Restore / Delete button in the
+   document-type list (survives innerHTML re-renders). */
+function bindDocTypeActions() {
+    var box = document.getElementById('doc-type-list');
+    if (!box || box.dataset.bound === '1') return;
+    box.dataset.bound = '1';
+    box.addEventListener('click', function (e) {
+        var btn = e.target.closest('[data-doc-action]');
+        if (!btn || !box.contains(btn)) return;
+
+        var id     = parseInt(btn.dataset.id, 10);
+        var action = btn.dataset.docAction;
+
+        if (action === 'remove' || action === 'restore') {
+            var question = action === 'remove'
+                ? 'Remove this document from the student request form?\n\nExisting requests keep it in their history.'
+                : 'Restore this document to the student request form?';
+            if (!confirm(question)) return;
+            postDocType('toggle', { id: id }, action === 'remove' ? 'Document removed.' : 'Document restored.');
+        } else if (action === 'delete') {
+            var name = btn.dataset.name || 'this document';
+            if (!confirm('Permanently delete "' + name + '"?\n\nThis document was never requested, so nothing else will change.')) return;
+            postDocType('delete', { id: id }, 'Document deleted.');
+        }
+    });
+}
+bindDocTypeActions();
 
 function postDocType(action, extra, doneMsg) {
     var fd = new FormData();
@@ -230,7 +269,7 @@ function postDocType(action, extra, doneMsg) {
     fd.append('csrf_token', CSRF_TOKEN);
     Object.keys(extra || {}).forEach(function (k) { fd.append(k, extra[k]); });
 
-    return fetch('../phpLogics/documentTypeAction.php', { method: 'POST', body: fd })
+    return fetch('../phpLogics/documentTypeAction.php', { method: 'POST', body: fd, cache: 'no-store' })
         .then(function (r) { return r.json(); })
         .then(function (data) {
             if (data.success) {
@@ -270,18 +309,8 @@ function addDocType() {
         });
 }
 
-function toggleDocType(id, mode) {
-    var question = mode === 'remove'
-        ? 'Remove this document from the student request form?\n\nExisting requests keep it in their history.'
-        : 'Restore this document to the student request form?';
-    if (!confirm(question)) return;
-    postDocType('toggle', { id: id }, mode === 'remove' ? 'Document removed.' : 'Document restored.');
-}
-
-function deleteDocType(id, name) {
-    if (!confirm('Permanently delete "' + name + '"?\n\nThis document was never requested, so nothing else will change.')) return;
-    postDocType('delete', { id: id }, 'Document deleted.');
-}
+/* Remove / Restore / Delete are handled by the delegated listener in
+   bindDocTypeActions() above. */
 
 /* ══════════ Own account ══════════ */
 var photoFile = null;
@@ -345,13 +374,24 @@ function escapeHtml(str) {
     return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
+/* Attribute-safe escaper (global — the request-modal section defines its own
+   scoped copy inside an IIFE; top-level code like renderDocTypes uses this). */
+function escapeAttr(s) {
+    return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
 function loadStudents() {
     fetch('../phpLogics/getStud.php')
         .then(function (res) { return res.json(); })
         .then(function (data) { renderStudents(data); })
         .catch(function () {
             document.getElementById('records-tbody').innerHTML =
-                '<tr><td colspan="7"><div class="empty-state"><div class="empty-icon">❌</div><p>Failed to load accounts.</p></div></td></tr>';
+                '<tr><td colspan="7"><div class="empty-state"><div class="empty-icon">' + svgIcon('x-circle', 26) + '</div><p>Failed to load accounts.</p></div></td></tr>';
         });
 }
 
@@ -405,7 +445,7 @@ function renderStudents(students) {
         // ── "View Documents" only makes sense for student accounts —
         //    registrars and admins never place requests.
         var viewDocsItem = (role === 'student')
-            ? '<a href="#" class="view-docs">📄 View Documents</a>'
+            ? '<a href="#" class="view-docs">' + svgIcon('file-text', 13) + ' View Documents</a>'
             : '';
 
         row.innerHTML =
@@ -418,11 +458,11 @@ function renderStudents(students) {
             '<td><div class="dropdown">' +
                 '<button class="dots-btn">⋮</button>' +
                 '<div class="dropdown-content">' +
-                    '<a href="#" class="edit">✏️ Edit Record</a>' +
+                    '<a href="#" class="edit">' + svgIcon('pencil', 13) + ' Edit Record</a>' +
                     viewDocsItem +
                     (isArchived
-                        ? '<a href="#" class="restore">♻️ Unarchive</a>'
-                        : '<a href="#" class="delete">📦 Archive</a>') +
+                        ? '<a href="#" class="restore">' + svgIcon('restore', 13) + ' Unarchive</a>'
+                        : '<a href="#" class="delete">' + svgIcon('package', 13) + ' Archive</a>') +
                 '</div></div></td>';
 
         tbody.appendChild(row);
@@ -548,7 +588,7 @@ document.addEventListener('click', function (e) {
         })
             .then(function (r) { return r.json(); })
             .then(function (d) {
-                if (d.success) { showToast('📦 Account archived', 'success'); loadStudents(); }
+                if (d.success) { showToast('Account archived', 'success'); loadStudents(); }
                 else showToast(d.message || 'Failed to archive.', 'error');
             });
         return;
@@ -576,7 +616,7 @@ document.addEventListener('click', function (e) {
         })
             .then(function (r) { return r.json(); })
             .then(function (d) {
-                if (d.success) { showToast('♻️ Account restored', 'success'); loadStudents(); }
+                if (d.success) { showToast('Account restored', 'success'); loadStudents(); }
                 else showToast(d.message || 'Failed to restore.', 'error');
             });
         return;
@@ -590,7 +630,7 @@ function openAddModal() {
     editingStudentId = null;
     originalEmail    = null;
     resetForm();
-    document.getElementById('addModalTitle').textContent        = '➕ Create an Account';
+    document.getElementById('addModalTitleText').textContent = 'Create an Account';
     document.getElementById('pw-required').style.display        = 'inline';
     document.getElementById('f-password').placeholder           = 'Password will be auto-filled from LRN if left blank';
     document.getElementById('modal-avatar-display').textContent = '';
@@ -616,7 +656,7 @@ function openEditModal(row) {
     if (lrnEl)    lrnEl.value    = row.dataset.lrn    || '';
 
 
-    document.getElementById('addModalTitle').textContent  = '✏️ Edit Information';
+    document.getElementById('addModalTitleText').textContent = 'Edit Information';
     document.getElementById('pw-required').style.display  = 'none';
     document.getElementById('f-password').placeholder     = 'Leave blank to keep current';
 
@@ -661,7 +701,7 @@ function resetForm() {
         if (id === 'f-password') {
             el.type = 'password';
             var btn = el.parentElement.querySelector('.pw-toggle');
-            if (btn) btn.textContent = '👁';
+            if (btn) btn.innerHTML = svgIcon('eye', 14);
         }
     });
 
@@ -695,14 +735,14 @@ function clearModalAvatar() {
     document.getElementById('f-photo').value                   = '';
     document.getElementById('modal-photo-name').textContent    = '';
     document.getElementById('modal-photo-clear').style.display = 'none';
-    document.getElementById('modal-avatar-display').innerHTML  = '👤';
+    document.getElementById('modal-avatar-display').innerHTML  = svgIcon('user', 40);
 }
 
 function togglePw(btn) {
     var input = document.getElementById('f-password');
     var hide  = input.type === 'password';
     input.type      = hide ? 'text' : 'password';
-    btn.textContent = hide ? '🙈' : '👁';
+    btn.innerHTML = svgIcon(hide ? 'eye-off' : 'eye', 14);
 }
 
 /* ── Validation & submit ── */
@@ -774,15 +814,15 @@ function submitStudent() {
             btn.disabled = false;
             if (data.success) {
                 closeAddModal();
-                showToast(editingStudentId ? '✏️ Account updated!' : '✅ ' + data.full_name + ' added!', 'success');
+                showToast(editingStudentId ? 'Account updated!' : data.full_name + ' added!', 'success');
                 loadStudents();
             } else {
-                showToast('❌ ' + (data.message || 'Failed to save.'), 'error');
+                showToast(data.message || 'Failed to save.', 'error');
             }
         })
         .catch(function () {
             btn.disabled = false;
-            showToast('❌ Network error. Please try again.', 'error');
+            showToast('Network error. Please try again.', 'error');
         });
 }
 
@@ -791,7 +831,7 @@ function openDocsModal(row) {
     var studentId   = row.dataset.id;
     var studentName = row.dataset.fullname;
 
-    document.getElementById('viewDocsTitle').textContent = '📄 Document Requests';
+    document.getElementById('viewDocsTitleText').textContent = 'Document Requests';
     var body = document.getElementById('docs-modal-body');
     body.innerHTML = '<p class="empty-state">Loading…</p>';
     document.getElementById('viewDocsModal').classList.add('active');
@@ -800,18 +840,18 @@ function openDocsModal(row) {
         .then(function (res) { return res.json(); })
         .then(function (data) { renderDocsModal(body, studentName, data); })
         .catch(function () {
-            body.innerHTML = '<p class="empty-state">❌ Failed to load requests.</p>';
+            body.innerHTML = '<p class="empty-state">' + svgIcon('x-circle', 22) + ' Failed to load requests.</p>';
         });
 }
 
 function renderDocsModal(body, studentName, counts) {
     var docTypes = [
-        { key: 'certificate_of_enrollment',            label: 'Cert. of Enrollment',      icon: '📝' },
-        { key: 'certificate_of_grades',                label: 'Cert. of Grades',          icon: '📊' },
-        { key: 'certificate_of_good_moral',            label: 'Good Moral',               icon: '🏅' },
-        { key: 'certificate_of_transfer',              label: 'Cert. of Transfer',        icon: '🔁' },
-        { key: 'certificate_of_completion_graduation', label: 'Completion / Graduation',  icon: '🎓' },
-        { key: 'other',                                label: 'Other',                    icon: '📁' }
+        { key: 'certificate_of_enrollment',            label: 'Cert. of Enrollment',      icon: 'file-text' },
+        { key: 'certificate_of_grades',                label: 'Cert. of Grades',          icon: 'chart' },
+        { key: 'certificate_of_good_moral',            label: 'Good Moral',               icon: 'award' },
+        { key: 'certificate_of_transfer',              label: 'Cert. of Transfer',        icon: 'repeat' },
+        { key: 'certificate_of_completion_graduation', label: 'Completion / Graduation',  icon: 'graduation' },
+        { key: 'other',                                label: 'Other',                    icon: 'folder' }
     ];
 
     var total = docTypes.reduce(function (sum, d) { return sum + (parseInt(counts[d.key]) || 0); }, 0);
@@ -846,14 +886,14 @@ function handleCsvImport(file) {
     var reader = new FileReader();
     reader.onload = function (e) {
         var lines = e.target.result.split(/\r?\n/).filter(function (l) { return l.trim(); });
-        if (lines.length < 2) { showToast('❌ CSV is empty or has no data rows.', 'error'); return; }
+        if (lines.length < 2) { showToast('CSV is empty or has no data rows.', 'error'); return; }
 
         var headers = lines[0].split(',').map(function (h) { return h.trim().toLowerCase().replace(/\s+/g, '_'); });
 
         var required = ['first_name', 'last_name', 'role', 'email', 'contact'];
         var missing  = required.filter(function (r) { return headers.indexOf(r) === -1; });
         if (missing.length) {
-            showToast('❌ CSV missing columns: ' + missing.join(', '), 'error');
+            showToast('CSV missing columns: ' + missing.join(', '), 'error');
             return;
         }
 
@@ -866,7 +906,7 @@ function handleCsvImport(file) {
             rows.push(obj);
         }
 
-        if (!rows.length) { showToast('❌ No valid rows found in CSV.', 'error'); return; }
+        if (!rows.length) { showToast('No valid rows found in CSV.', 'error'); return; }
         openCsvPreviewModal(rows, headers);
     };
     reader.readAsText(file);
@@ -893,13 +933,13 @@ function openCsvPreviewModal(rows, headers) {
         overlay.innerHTML =
             '<div class="modal-box modal-box--wide">' +
                 '<div class="modal-header">' +
-                    '<h3>📥 Import Preview</h3>' +
-                    '<button id="btn-close-csv-modal" class="modal-close" type="button">✕</button>' +
+                    '<h3>' + svgIcon('download', 16) + ' Import Preview</h3>' +
+                    '<button id="btn-close-csv-modal" class="modal-close" type="button">' + svgIcon('x', 13) + '</button>' +
                 '</div>' +
                 '<div class="modal-body" id="csv-preview-body" style="overflow-x:auto"></div>' +
                 '<div class="modal-footer" style="display:flex;gap:.75rem;justify-content:flex-end">' +
                     '<button id="btn-cancel-import" class="btn-cancel-req" type="button">Cancel</button>' +
-                    '<button id="btn-confirm-import" class="save-btn" type="button">✅ Import All</button>' +
+                    '<button id="btn-confirm-import" class="save-btn" type="button">' + svgIcon('check-circle', 15) + ' Import All</button>' +
                 '</div>' +
             '</div>';
         document.body.appendChild(overlay);
@@ -958,9 +998,9 @@ function executeCsvImport(rows, btn) {
     function importNext(idx) {
         if (idx >= rows.length) {
             btn.disabled    = false;
-            btn.textContent = '✅ Import All';
+            btn.textContent = 'Importing…';
             document.getElementById('csvPreviewModal').classList.remove('active');
-            showToast('📥 Import done: ' + success + ' added, ' + failed + ' failed.', success > 0 ? 'success' : 'error');
+            showToast('Import done: ' + success + ' added, ' + failed + ' failed.', success > 0 ? 'success' : 'error');
             loadStudents();
             return;
         }
@@ -1163,6 +1203,23 @@ document.addEventListener('DOMContentLoaded', function () {
         document.getElementById('tab-archived').classList.toggle('active', !isMain);
     };
 
+    /* Jump to the requests view with a status chip activated — used by the
+       stat tiles and the overdue banner (same helper as the registrar). */
+    window.jumpToRequests = function (status, tab) {
+        tab = (tab === 'archived' || tab === 'history') ? 'archived' : 'main';
+        showView('requests');
+        switchReqTab(tab);
+        var chips = document.getElementById('chips-' + tab);
+        var chip = chips && chips.querySelector('[data-filter="' + (status || '') + '"]');
+        if (chip) chip.click();
+        else {
+            var all = chips && chips.querySelector('[data-filter=""]');
+            if (all) all.click();
+        }
+        var target = document.getElementById(tab === 'main' ? 'view-main' : 'view-archived');
+        if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    };
+
     /* ── Search + status-chip filtering (combined) ── */
     var rowFilters = {
         main:     { query: '', status: '' },
@@ -1219,14 +1276,14 @@ document.addEventListener('DOMContentLoaded', function () {
     /* ── Status badge (mirrors the PHP statusBadge helper) ── */
     function statusBadgeHtml(status, cancelledBy) {
         if (status === 'Cancelled') {
-            if (cancelledBy === 'registrar') return '<span class="status rejected">Rejected</span>';
-            return '<span class="status cancelled">Cancelled</span>';
+            if (cancelledBy === 'registrar') return '<span class="badge rejected">Rejected</span>';
+            return '<span class="badge cancelled">Cancelled</span>';
         }
         var cls = {
             'Pending': 'pending', 'Processing': 'processing',
             'Ready for Pickup': 'ready', 'Released': 'released'
         }[status] || 'pending';
-        return '<span class="status ' + cls + '">' + escapeAttr(status) + '</span>';
+        return '<span class="badge ' + cls + '">' + escapeAttr(status) + '</span>';
     }
 
     function initialsOf(name) {
@@ -1238,8 +1295,8 @@ document.addEventListener('DOMContentLoaded', function () {
 
     /* ── Document requirement card metadata ── */
     var DOC_META = {
-        idPhoto: { icon: '🪪', title: 'Valid ID',      tag: 'Required', cls: 'tag-req',  field: 'id_photo' },
-        eCert:   { icon: '🎓', title: 'E-Certificate', tag: 'Released', cls: 'tag-cert', field: 'e_certificate' }
+        idPhoto: { icon: svgIcon('id-card', 15), title: 'Valid ID',      tag: 'Required', cls: 'tag-req',  field: 'id_photo' },
+        eCert:   { icon: svgIcon('award', 15), title: 'E-Certificate', tag: 'Released', cls: 'tag-cert', field: 'e_certificate' }
     };
 
     /* ── Request details modal ── */
@@ -1266,6 +1323,37 @@ document.addEventListener('DOMContentLoaded', function () {
         }
 
         document.getElementById('modal-purpose').textContent = d.purpose || '—';
+
+        /* Contextual action bar — Accept (Pending) / Release (Processing) / Reject (active).
+           Same consolidated flow as the registrar: no per-row buttons. */
+        var bar        = document.getElementById('modal-actions-bar');
+        var acceptForm = document.getElementById('modal-accept-form');
+        var releaseBtn = document.getElementById('modal-release-btn');
+        var rejectBtn  = document.getElementById('modal-reject-btn');
+        var isPending    = d.status === 'Pending';
+        var isProcessing = d.status === 'Processing';
+        var isActive     = isPending || isProcessing;
+
+        if (bar) {
+            bar.style.display        = isActive ? '' : 'none';
+            acceptForm.style.display = isPending ? '' : 'none';
+            releaseBtn.style.display = isProcessing ? '' : 'none';
+            rejectBtn.style.display  = isActive ? '' : 'none';
+            bar.dataset.isPending    = isPending ? '1' : '0';
+
+            document.getElementById('mab-info').textContent = isPending
+                ? 'Verified the details? Accept to move this request to Processing.'
+                : 'Ready to hand over? Release generates and emails the e-certificate.';
+
+            document.getElementById('modal-accept-req-id').value = d.reqId || '';
+            releaseBtn.dataset.reqId   = d.reqId || '';
+            releaseBtn.dataset.student = d.student || '';
+            releaseBtn.dataset.doc     = d.doc || '';
+            rejectBtn.onclick = function () {
+                closeModal();
+                openRejectModal(String(d.reqId || ''));
+            };
+        }
 
         renderDocs(d);
 
@@ -1314,19 +1402,19 @@ document.addEventListener('DOMContentLoaded', function () {
             prev =
                 '<div class="doc-thumb" title="Click to enlarge">' +
                     '<img src="' + escapeAttr(url) + '" alt="' + escapeAttr(meta.title) + '" loading="lazy">' +
-                    '<span class="doc-zoom">🔍 Click to enlarge</span>' +
+                    '<span class="doc-zoom">' + svgIcon('search', 11) + ' Click to enlarge</span>' +
                 '</div>';
         } else if (isPdf) {
             prev =
                 '<div class="doc-thumb doc-thumb-pdf" data-pdf="' + escapeAttr(url) + '" title="Open PDF viewer">' +
-                    '<span class="pdf-icon">📄</span>' +
+                    '<span class="pdf-icon">' + svgIcon('file-text', 22) + '</span>' +
                     '<span class="doc-fmt">PDF Document</span>' +
-                    '<span class="doc-zoom">📖 Open viewer</span>' +
+                    '<span class="doc-zoom">' + svgIcon('book', 14) + ' Open viewer</span>' +
                 '</div>';
         } else {
             prev =
                 '<div class="doc-thumb doc-thumb-file">' +
-                    '<span class="pdf-icon">🗂️</span>' +
+                    '<span class="pdf-icon">' + svgIcon('folder', 22) + '</span>' +
                     '<span class="doc-fmt">' + escapeAttr(ext.toUpperCase()) + ' File</span>' +
                 '</div>';
         }
@@ -1335,8 +1423,8 @@ document.addEventListener('DOMContentLoaded', function () {
             '<div class="doc-card-foot">' +
                 '<span class="doc-filename" title="' + escapeAttr(name) + '">' + escapeAttr(name) + '</span>' +
                 '<span class="doc-actions">' +
-                    (isPdf ? '<a class="doc-act" href="' + escapeAttr(url) + '" target="_blank" rel="noopener">👁 View</a>' : '') +
-                    '<a class="doc-act doc-act-dl" href="' + escapeAttr(url) + '" download="' + escapeAttr(name) + '">⬇ Download</a>' +
+                    (isPdf ? '<a class="doc-act" href="' + escapeAttr(url) + '" target="_blank" rel="noopener">' + svgIcon('eye', 12) + ' View</a>' : '') +
+                    '<a class="doc-act doc-act-dl" href="' + escapeAttr(url) + '" download="' + escapeAttr(name) + '">' + svgIcon('download', 12) + ' Download</a>' +
                 '</span>' +
             '</div>';
 
@@ -1384,7 +1472,16 @@ document.addEventListener('DOMContentLoaded', function () {
             .then(function (r) { return r.json(); })
             .then(function (data) {
                 renderHistory(box, data);
-                renderStudentInfo(data && data.student);
+                renderStudentInfo(data);
+
+                /* Review lock note — when this Pending request was already
+                   reviewed (viewed) earlier, student edits are locked. */
+                var mab = document.getElementById('mab-info');
+                if (mab && data && data.reviewed_at
+                    && document.getElementById('modal-actions-bar').dataset.isPending === '1') {
+                    mab.textContent = 'Student edits are LOCKED (office first reviewed this request on '
+                        + data.reviewed_at + '). ' + mab.textContent;
+                }
             })
             .catch(function () {
                 box.innerHTML = '<p class="history-loading">Failed to load history.</p>';
@@ -1393,17 +1490,25 @@ document.addEventListener('DOMContentLoaded', function () {
             });
     }
 
-    function renderStudentInfo(s) {
+    function renderStudentInfo(data) {
         var box = document.getElementById('student-info');
+        var s = data && data.student;
         if (!s) {
             box.innerHTML = '<p class="history-loading">No student record found.</p>';
             return;
         }
+
+        // Grade Level / Last SY are the values the student entered on THIS
+        // request (per-request snapshot) — not the account-level values.
+        var req = (data && data.request) || {};
+
         var fields = [
-            ['Student ID',     s.student_id],
-            ['LRN',            s.lrn],
-            ['Email',          s.email],
-            ['Contact Number', s.contact]
+            ['Student ID',                s.student_id],
+            ['LRN',                       s.lrn],
+            ['Grade Level',               req.grade_level],
+            ['Last School Year Attended', req.school_year_last_attended],
+            ['Email',                     s.email],
+            ['Contact Number',            s.contact]
         ];
         var html = '';
         fields.forEach(function (f) {
@@ -1426,11 +1531,11 @@ document.addEventListener('DOMContentLoaded', function () {
         if (data.same_doc_count > 0) {
             var lastTxt = data.same_doc_last ? ' — most recent was ' + data.same_doc_last : '';
             html += '<div class="history-banner repeat">'
-                  + '🔁 This student already requested <strong>' + escapeAttr(data.current_doc || 'this document') + '</strong> '
+                  + ' ' + svgIcon('repeat', 12) + ' This student already requested <strong>' + escapeAttr(data.current_doc || 'this document') + '</strong> '
                   + data.same_doc_count + ' time(s) before' + lastTxt + '.'
                   + '</div>';
         } else {
-            html += '<div class="history-banner first">✅ First time this student requests <strong>'
+            html += '<div class="history-banner first">' + svgIcon('check-circle', 12) + ' First time this student requests <strong>'
                   + escapeAttr(data.current_doc || 'this document') + '</strong>.</div>';
         }
         data.items.forEach(function (it) {
@@ -1461,6 +1566,17 @@ document.addEventListener('DOMContentLoaded', function () {
         document.getElementById('docs-grid').innerHTML       = '';
         document.getElementById('student-info').innerHTML    = '';
         document.getElementById('content-history').innerHTML = '';
+
+        /* Hide + reset the contextual action bar */
+        var bar = document.getElementById('modal-actions-bar');
+        if (bar) {
+            bar.style.display = 'none';
+            document.getElementById('modal-accept-form').style.display = 'none';
+            document.getElementById('modal-release-btn').style.display = 'none';
+            document.getElementById('modal-reject-btn').style.display  = 'none';
+            document.getElementById('mab-info').textContent = '';
+        }
+
         document.body.style.overflow = '';
     }
 
@@ -1515,24 +1631,10 @@ document.addEventListener('DOMContentLoaded', function () {
         setupChips('archived');
 
         /* Clickable stat cards → jump to the filtered table */
-        document.querySelectorAll('.reqmgr .card-click').forEach(function (card) {
+        document.querySelectorAll('.card-click').forEach(function (card) {
             card.addEventListener('click', function () {
-                showView('requests');
-                var tab = card.dataset.tab === 'archived' ? 'archived' : 'main';
-                switchReqTab(tab);
-
-                var status = card.dataset.goto || '';
-                var chips = document.getElementById('chips-' + tab);
-                if (chips) {
-                    var chip = chips.querySelector('[data-filter="' + status + '"]');
-                    if (chip) chip.click();
-                    else {
-                        var all = chips.querySelector('[data-filter=""]');
-                        if (all) all.click();
-                    }
-                }
-                document.getElementById(tab === 'main' ? 'view-main' : 'view-archived')
-                    .scrollIntoView({ behavior: 'smooth', block: 'start' });
+                var tab = (card.dataset.tab === 'archived' || card.dataset.view === 'history') ? 'archived' : 'main';
+                jumpToRequests(card.dataset.goto || '', tab);
             });
         });
 
@@ -1573,6 +1675,11 @@ document.addEventListener('DOMContentLoaded', function () {
         document.body.addEventListener('click', function (e) {
             var btn = e.target.closest('.btn-release');
             if (!btn) return;
+
+            /* If Release was clicked from inside the details modal, close it
+               first — its z-index sits above the release modal. */
+            var fmEl = document.getElementById('file-modal');
+            if (fmEl && fmEl.style.display === 'flex') closeModal();
 
             document.getElementById('rel-req-id').textContent =
                 'Request #' + String(btn.dataset.reqId || '').padStart(4, '0');

@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>HEHMS — PROPOSED ERD (v5 — draft, not applied)</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<style>
+  body { font-family: 'Segoe UI', Arial, sans-serif; background:#f4f6fa; margin:0; padding:24px; }
+  .banner { background:#fff7e0; border:2px dashed #e6a700; border-radius:8px;
+            padding:12px 18px; max-width:1500px; margin:0 auto 18px;
+            color:#7a5b00; font-weight:600; }
+  h1 { text-align:center; color:#1f3864; margin:6px 0 2px; }
+  .sub { text-align:center; color:#666; margin:0 0 18px; }
+  .diagram { background:#fff; border:1px solid #d5dbe5; border-radius:10px;
+             padding:24px; max-width:1500px; margin:0 auto; overflow-x:auto; }
+  .legend { max-width:1500px; margin:18px auto 0; background:#fff;
+            border:1px solid #d5dbe5; border-radius:10px; padding:14px 22px;
+            color:#333; line-height:1.7; }
+  .legend b { color:#1f3864; }
+  code { background:#eef1f7; padding:1px 6px; border-radius:4px; font-size:.92em; }
+  @media print { .banner{display:none} body{background:#fff;padding:0} }
+</style>
+</head>
+<body>
+<div class="banner">DRAFT / PROPOSAL v5 — roles + student_profiles +
+document_type_id link (duplicate text column removed). NOT yet applied to the live database.</div>
+
+<h1>HEHMS Entity-Relationship Diagram</h1>
+<p class="sub"><b>Proposed v5</b> &middot; 7 relationships &middot; only SITE_SETTINGS standalone</p>
+
+<div class="diagram">
+<pre class="mermaid">
+erDiagram
+    ROLES ||--o{ USERS : "classifies"
+    USERS ||--|| STUDENT_PROFILES : "has (students only)"
+    USERS ||--o{ DOCUMENT_REQUESTS : "places"
+    DOCUMENT_TYPES ||--o{ DOCUMENT_REQUESTS : "categorizes"
+    USERS ||--o{ ANNOUNCEMENTS : "authors"
+    USERS ||--o{ AUDIT_LOGS : "generates"
+    USERS |o--o{ CREDENTIAL_RESEND_LOG : "triggers (soft ref by email)"
+
+    ROLES {
+        int role_id PK "1=Student 2=Registrar 3=Admin"
+        varchar role_name UK
+    }
+    USERS {
+        int id PK
+        int role_id FK "replaces old varchar role"
+        varchar first_name
+        varchar last_name
+        varchar email UK "login identifier"
+        varchar contact
+        varchar password "bcrypt hash"
+        varchar status "active | archived"
+        varchar profile_photo
+        int failed_login_count "security"
+        int lockout_count "security"
+        datetime locked_until "security"
+        timestamp created_at
+        timestamp updated_at
+    }
+    STUDENT_PROFILES {
+        int user_id PK,FK "1:1 with users.id"
+        varchar student_id UK "school number 2026-0001"
+        varchar lrn "12-digit Learner Ref No."
+        varchar grade_level "Grade 11 | Grade 12"
+        varchar school_year_last_attended "2024-2025"
+    }
+    DOCUMENT_TYPES {
+        int id PK
+        varchar name UK "Good Moral, SF10, Diploma..."
+        tinyint requires_grade_level "1 = form asks grade level"
+        tinyint is_active "0 = hidden, kept for history"
+        int sort_order
+        datetime created_at
+    }
+    DOCUMENT_REQUESTS {
+        int id PK
+        int user_id FK "who placed the request"
+        int document_type_id FK "real link to document_types"
+        varchar purpose "stated reason"
+        enum status "Pending|Processing|Ready for Pickup|Released|Cancelled"
+        varchar rejection_reason
+        datetime date_requested
+        datetime registrar_viewed_at "locks student editing"
+        datetime date_released
+        varchar id_photo "uploaded requirement"
+        varchar e_certificate "generated PDF"
+    }
+    ANNOUNCEMENTS {
+        int id PK
+        varchar title
+        text message
+        tinyint is_active "shown on dashboard"
+        int created_by FK "author (SET NULL on delete)"
+        datetime created_at
+    }
+    AUDIT_LOGS {
+        int id PK
+        int user_id FK "NULL if account deleted"
+        varchar actor_name "snapshot at event time"
+        varchar actor_role
+        varchar action "LOGIN, STATUS_CHANGED, ..."
+        varchar entity "auth | document_request | user"
+        varchar entity_id "e.g. REQ-0005"
+        varchar ip_address "IPv4/IPv6"
+        timestamp created_at
+    }
+    CREDENTIAL_RESEND_LOG {
+        int id PK
+        varchar email "matches users.email (soft FK)"
+        datetime requested_at "rate-limit 3/hr"
+    }
+    SITE_SETTINGS {
+        varchar setting_key PK "logo_path | theme_color"
+        varchar setting_value
+        timestamp updated_at
+    }
+</pre>
+</div>
+
+<div class="legend">
+  <b>Final draft — locked-in decisions:</b>
+  <ol>
+    <li><b>ROLES lookup</b> seeded 1=Student, 2=Registrar, 3=Admin;
+        <code>users.role</code> varchar replaced by <code>role_id</code> FK.</li>
+    <li><b>STUDENT_PROFILES (1:1)</b> receives all five student-only columns:
+        <code>user_id</code> (PK&amp;FK), <code>student_id</code>,
+        <code>lrn</code>, <code>grade_level</code>,
+        <code>school_year_last_attended</code> — all removed from
+        <code>users</code>.</li>
+    <li><b>DOCUMENT_TYPES no longer orphan</b> — new
+        <code>document_requests.document_type_id</code> FK <b>replaces</b> the
+        old free-text <code>document_type</code> column (duplicate removed;
+        the name is always read via the join).</li>
+    <li>Relationships: <b>3 &rarr; 7</b>. Only <code>SITE_SETTINGS</code>
+        stands alone (system config — intentional).</li>
+  </ol>
+  <b>See</b> <code>database/ERD-redesign-proposal.md</code> for the exact
+  migration that will run once approved.
+</div>
+
+<script>mermaid.initialize({ startOnLoad:true, theme:'default',
+  er:{ diagramPadding:24, entityPadding:16, fontSize:13 } });</script>
+</body>
+</html>

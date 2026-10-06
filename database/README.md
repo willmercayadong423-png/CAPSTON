@@ -25,13 +25,15 @@ Everything the panel needs for the database side of your system.
 
 ## Schema highlights (talking points for the panel)
 
-- **5 tables, fully normalized** — `users` (role-based accounts), `document_requests`, `announcements`, `site_settings`, `credential_resend_log`.
+- **7 tables, fully normalized** — `users` (role-based accounts), `document_requests`, `document_types` (admin-managed requestable docs), `announcements`, `site_settings`, `credential_resend_log`, `audit_logs` (append-only trail).
 - **InnoDB + enforced foreign keys** — referential integrity (deleting a student cascades to their requests; deleting an announcement author sets NULL).
 - **utf8mb4 everywhere** — correct storage of Filipino names (ñ, é).
 - **bcrypt-only passwords** — `password_hash()` / `password_verify()`, no plaintext anywhere.
-- **Performance indexes** on `status`, `date_requested`, `role`, `email` — the exact columns the dashboards filter and sort by.
-- **Lifecycle documented in ENUM** — `Pending → Processing → Released / Cancelled`, with rejection metadata in `cancelled_by`.
+- **Performance indexes** on `status`, `date_requested`, `document_type`, `role`, `email` — the exact columns the dashboards filter, sort and count by.
+- **Lifecycle documented in ENUM** — `Pending → Processing → Released / Cancelled`, with rejection metadata in `cancelled_by` + `rejection_reason`.
+- **Review-lock timestamp** — `registrar_viewed_at` freezes student edits once the office opens a request's details.
 - **Audit timestamps** — `created_at` + `updated_at` (auto-maintained by MySQL).
+- **Payment columns removed** — payment is settled in person at the Registrar's Office, so no payment fields are stored.
 
 ## Request lifecycle (for your flow diagram)
 

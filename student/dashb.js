@@ -5,7 +5,11 @@
 /* ── Sidebar view switcher ── */
 function showView(view) {
 
+    // Whitelist — an unknown view (bad ?view= in the URL) would hide
+    // every section and leave a blank page.
     const views = ['dashboard', 'request', 'requests', 'account', 'notifications'];
+    if (views.indexOf(view) === -1) view = 'dashboard';
+
     views.forEach(function (v) {
         const el = document.getElementById('view-' + v);
         if (el) {
@@ -59,6 +63,11 @@ function selectDocument(docName) {
     document.getElementById('step-document').style.display = 'none';
     document.getElementById('step-form').style.display = 'block';
 
+    // Step indicator (portal design) — best effort, optional elements
+    var d1 = document.getElementById('stepdot-1'), d2 = document.getElementById('stepdot-2');
+    if (d1) d1.classList.remove('active');
+    if (d2) d2.classList.add('active');
+
     sessionStorage.setItem('hehms_selected_doc', docName);
 
     history.replaceState({}, '', '?view=request&step=form');
@@ -67,6 +76,11 @@ function selectDocument(docName) {
 function backToStep1() {
     document.getElementById('step-document').style.display = 'block';
     document.getElementById('step-form').style.display = 'none';
+
+    // Step indicator (portal design) — best effort, optional elements
+    var d1 = document.getElementById('stepdot-1'), d2 = document.getElementById('stepdot-2');
+    if (d1) d1.classList.add('active');
+    if (d2) d2.classList.remove('active');
 
     sessionStorage.removeItem('hehms_selected_doc');
 
@@ -83,9 +97,15 @@ function submitRequest() {
     var purpose = document.getElementById('purpose-input');
     var idPhoto = document.getElementById('new-id-input');
 
-    if (!purpose.value.trim()) {
-        alert('Please enter the purpose / reason for your request.');
+    if (!purpose.value) {
+        alert('Please select the purpose of your request.');
         purpose.focus();
+        return;
+    }
+    var purposeOther = document.getElementById('purpose-other-input');
+    if (purpose.value === 'Other' && purposeOther && !purposeOther.value.trim()) {
+        alert('Please specify your purpose (under Other).');
+        purposeOther.focus();
         return;
     }
     if (!idPhoto.files || idPhoto.files.length === 0) {
@@ -172,13 +192,16 @@ function applyRowFilter(scope) {
     });
 
     // Friendly "no match" row when the filters hide everything
+    // (colspan matches this table's real column count)
     var noMatch = tbody.querySelector('.no-match-row');
     if (active && visible === 0) {
         if (!noMatch) {
+            var refRow = tbody.querySelector('tr[data-status]') || tbody.querySelector('tr');
+            var cols   = refRow ? refRow.children.length : 6;
             noMatch = document.createElement('tr');
             noMatch.className = 'no-match-row';
             noMatch.innerHTML =
-                '<td colspan="6" style="text-align:center;padding:2rem;color:#888;">' +
+                '<td colspan="' + cols + '" style="text-align:center;padding:2rem;color:#888;">' +
                 'No requests match the current search / filter.</td>';
             tbody.appendChild(noMatch);
         }
@@ -258,13 +281,30 @@ function toggleReqFields(docName) {
     }
 }
 
-function toggleSyForDoc(docName) { toggleReqFields(docName); }   // legacy alias
-
-function updateSyField(selectEl, inputEl, wrapEl, value) {
-    var needsSy = (selectEl.value === 'Certificate of Good Moral');
-    wrapEl.style.display = needsSy ? '' : 'none';
-    inputEl.value = needsSy ? (value || '') : '';
+/* ── Dropdown helpers (request form + edit modal) ───────────── */
+function toggleOtherPurpose(otherInputId) {
+    otherInputId = otherInputId || 'purpose-other-input';
+    var other  = document.getElementById(otherInputId);
+    var select = document.getElementById(otherInputId === 'edit-purpose-other-input'
+        ? 'edit-purpose' : 'purpose-input');
+    if (!other || !select) return;
+    var isOther = select.value === 'Other';
+    other.style.display = isOther ? '' : 'none';
+    if (!isOther) other.value = '';
 }
+
+/* Set a <select>'s value, first adding it as an option when the saved
+   value is legacy free-text that isn't in the dropdown list. */
+function setSelectValue(selectEl, value) {
+    if (!selectEl) return;
+    if (value) {
+        var exists = Array.prototype.slice.call(selectEl.options).some(function (o) { return o.value === value; });
+        if (!exists) selectEl.add(new Option(value, value));
+    }
+    selectEl.value = value || '';
+}
+
+function toggleSyForDoc(docName) { toggleReqFields(docName); }   // legacy alias
 
 /* ── Edit modal: toggle Grade Level + School Year together ── */
 function updateEditReqFields(docType, glValue, syValue) {
@@ -274,21 +314,35 @@ function updateEditReqFields(docType, glValue, syValue) {
     var glInp  = document.getElementById('edit-gl-input');
     if (glWrap && glInp) {
         glWrap.style.display = needsGl ? '' : 'none';
-        glInp.value = needsGl ? (glValue || '') : '';
+        setSelectValue(glInp, needsGl ? glValue : '');
     }
 
     var syWrap = document.getElementById('edit-sy-wrap');
     var syInp  = document.getElementById('edit-sy-input');
     if (syWrap && syInp) {
         syWrap.style.display = '';          // SY is required for every document
-        syInp.value = syValue || '';
+        setSelectValue(syInp, syValue);
     }
 }
 
 /* ── Edit modal ── */
 function openEditModal(id, docType, purpose, existId, existSy, existGl) {
-    document.getElementById('edit-req-id').value  = id;
-    document.getElementById('edit-purpose').value = purpose;
+    document.getElementById('edit-req-id').value = id;
+
+    // Purpose dropdown: pick the saved list option, or "Other" + free text
+    var purposeSel   = document.getElementById('edit-purpose');
+    var purposeOther = document.getElementById('edit-purpose-other-input');
+    var purposeKnown = Array.prototype.slice.call(purposeSel.options).some(function (o) {
+        return o.value === purpose && purpose !== '';
+    });
+    if (purpose && !purposeKnown) {
+        purposeSel.value   = 'Other';
+        purposeOther.value = purpose;
+    } else {
+        purposeSel.value   = purpose || '';
+        purposeOther.value = '';
+    }
+    toggleOtherPurpose('edit-purpose-other-input');
 
     var sel = document.getElementById('edit-doc-type');
 
@@ -386,7 +440,7 @@ function applyExisting(existingPath, cardId, badgeId, linkId, reqId, field) {
                     'onerror="this.style.display=\'none\'">';
             } else if (ext === 'pdf') {
                 prevEl.innerHTML =
-                    '<div class="pdf-badge"><span>📄</span>PDF on file &mdash; ' +
+                    '<div class="pdf-badge"><span>' + svgIcon('file-text', 13) + '</span>PDF on file &mdash; ' +
                     '<a href="' + downloadUrl + '" target="_blank" ' +
                     'style="color:#155724;font-weight:700;text-decoration:underline;" ' +
                     'onclick="event.stopPropagation()">Open &#8599;</a></div>';
@@ -429,7 +483,7 @@ function cardFileSelected(input, cardId, nameId, previewId) {
             };
             reader.readAsDataURL(file);
         } else if (ext === 'pdf') {
-            prevEl.innerHTML = '<div class="pdf-badge"><span>📄</span>PDF Ready</div>';
+            prevEl.innerHTML = '<div class="pdf-badge"><span>' + svgIcon('file-text', 13) + '</span>PDF Ready</div>';
             prevEl.classList.add('visible');
         } else {
             prevEl.classList.remove('visible');
@@ -466,23 +520,9 @@ function cardDrop(e, cardId, inputId, nameId, previewId) {
     cardFileSelected(input, cardId, nameId, previewId);
 }
 
-/* ── Profile photo preview ── */
-function previewAvatar(input) {
-    var preview  = document.getElementById('avatar-new-preview');
-    var nameEl   = document.getElementById('avatar-new-name');
-    var avatarEl = document.getElementById('avatar-display');
-
-    if (input.files && input.files[0]) {
-        var reader = new FileReader();
-        reader.onload = function (ev) {
-            avatarEl.innerHTML =
-                '<img src="' + ev.target.result + '" alt="Preview" style="width:100%;height:100%;object-fit:cover;">';
-        };
-        reader.readAsDataURL(input.files[0]);
-        nameEl.textContent = input.files[0].name;
-        preview.classList.add('visible');
-    }
-}
+/* ── Profile photo preview ──
+   NOTE: previewAvatar is defined in dashboard.php's inline script (it also
+   fills the small "new photo" thumbnail) — intentionally not duplicated here. */
 
 /* ── Auto-switch to archived tab from URL param ── */
 (function () {
@@ -495,6 +535,8 @@ function previewAvatar(input) {
 function toggleProfileMenu(event) {
     event.stopPropagation();
     document.getElementById("profileDropdown").classList.toggle("show");
+    // Only one header dropdown open at a time
+    closeNotifPanel();
 }
 
 function closeProfileMenu() {
@@ -509,6 +551,32 @@ document.addEventListener("click", function(e) {
 
     if (!wrapper.contains(e.target)) {
         menu.classList.remove("show");
+    }
+});
+
+
+/* ── Notification bell panel ── */
+function toggleNotifPanel(event) {
+    event.stopPropagation();
+    document.getElementById("notifPanel").classList.toggle("open");
+    // Only one header dropdown open at a time
+    closeProfileMenu();
+    // Refresh unread highlights + badge count when the panel opens
+    initNotificationsReadState();
+}
+
+function closeNotifPanel() {
+    document.getElementById("notifPanel").classList.remove("open");
+}
+
+document.addEventListener("click", function(e) {
+    const panel = document.getElementById("notifPanel");
+    const wrapper = document.querySelector(".notif-panel-wrapper");
+
+    if (!panel || !wrapper) return;
+
+    if (!wrapper.contains(e.target)) {
+        panel.classList.remove("open");
     }
 });
 
@@ -539,7 +607,7 @@ function filterNotifs(type, btn) {
         emptyCategory.id = 'notif-category-empty';
         emptyCategory.className = 'notif-empty-state';
         emptyCategory.style.padding = '40px 20px';
-        emptyCategory.innerHTML = '<div class="notif-empty-icon">📭</div><h3>No notifications found</h3><p>There are no notifications matching this filter.</p>';
+        emptyCategory.innerHTML = '<div class="notif-empty-icon">' + svgIcon('inbox', 30) + '</div><h3>No notifications found</h3><p>There are no notifications matching this filter.</p>';
         container.appendChild(emptyCategory);
     }
     if (emptyCategory) {
@@ -547,13 +615,20 @@ function filterNotifs(type, btn) {
     }
 }
 
-function markAllNotifsAsRead() {
-    const now = Date.now();
-    localStorage.setItem('hehms_student_notif_last_seen', now.toString());
+/* Storage access can throw (blocked cookies / private mode) — never let
+   it kill the read-state logic. */
+function notifStorageSet(key, val) { try { localStorage.setItem(key, val); } catch (e) {} }
+function notifStorageGet(key)     { try { return localStorage.getItem(key); } catch (e) { return null; } }
 
-    // Visually unmark unread state
+function markAllNotifsAsRead() {
+    notifStorageSet('hehms_student_notif_last_seen', Date.now().toString());
+
+    // Visually unmark unread state (full view cards + bell panel items)
     document.querySelectorAll('.notif-card.is-unread').forEach(function (card) {
         card.classList.remove('is-unread');
+    });
+    document.querySelectorAll('.np-item.np-unread').forEach(function (item) {
+        item.classList.remove('np-unread');
     });
 
     // Clear / hide badges
@@ -563,23 +638,22 @@ function markAllNotifsAsRead() {
     const dropdownBadge = document.getElementById('dropdownNotifBadge');
     if (dropdownBadge) dropdownBadge.style.display = 'none';
 
-    const sidebarPill = document.getElementById('sidebarNotifPill');
-    if (sidebarPill) sidebarPill.style.display = 'none';
-
-    const btn = document.querySelector('.btn-mark-all-read');
-    if (btn) {
+    // Feedback on whichever "mark all read" button(s) exist
+    ['.btn-mark-all-read', '.np-mark-read'].forEach(function (sel) {
+        const btn = document.querySelector(sel);
+        if (!btn) return;
         const origText = btn.innerHTML;
-        btn.innerHTML = '✓ All marked as read';
+        btn.textContent = 'All marked as read';
         btn.disabled = true;
         setTimeout(function () {
             btn.innerHTML = origText;
             btn.disabled = false;
         }, 2000);
-    }
+    });
 }
 
 function initNotificationsReadState() {
-    const lastSeenStr = localStorage.getItem('hehms_student_notif_last_seen');
+    const lastSeenStr = notifStorageGet('hehms_student_notif_last_seen');
     const lastSeen = lastSeenStr ? parseInt(lastSeenStr, 10) : 0;
 
     let unreadCount = 0;
@@ -596,14 +670,18 @@ function initNotificationsReadState() {
         }
     });
 
+    // Bell dropdown panel items share the same unread logic
+    document.querySelectorAll('.np-item').forEach(function (item) {
+        const timeSec = parseInt(item.dataset.time || '0', 10);
+        item.classList.toggle('np-unread', (timeSec * 1000) > lastSeen);
+    });
+
     const avatarBadge = document.getElementById('avatarNotifBadge');
     const dropdownBadge = document.getElementById('dropdownNotifBadge');
-    const sidebarPill = document.getElementById('sidebarNotifPill');
 
     if (unreadCount === 0) {
         if (avatarBadge) avatarBadge.style.display = 'none';
         if (dropdownBadge) dropdownBadge.style.display = 'none';
-        if (sidebarPill) sidebarPill.style.display = 'none';
     } else {
         const displayVal = unreadCount > 99 ? '99+' : unreadCount;
         if (avatarBadge) {
@@ -613,10 +691,6 @@ function initNotificationsReadState() {
         if (dropdownBadge) {
             dropdownBadge.textContent = displayVal;
             dropdownBadge.style.display = 'inline-block';
-        }
-        if (sidebarPill) {
-            sidebarPill.textContent = displayVal;
-            sidebarPill.style.display = 'inline-block';
         }
     }
 }
@@ -647,6 +721,10 @@ window.addEventListener('DOMContentLoaded', function () {
 
             document.getElementById('step-document').style.display = 'none';
             document.getElementById('step-form').style.display = 'block';
+
+            var _d1 = document.getElementById('stepdot-1'), _d2 = document.getElementById('stepdot-2');
+            if (_d1) _d1.classList.remove('active');
+            if (_d2) _d2.classList.add('active');
 
             if (savedDoc) {
                 document.getElementById('selected-document-input').value = savedDoc;
@@ -684,20 +762,31 @@ document.getElementById('main-tbody').addEventListener('click', function (e) {
     );
 });
 
+/* ── Upload cards: click the card → open the file picker ──────────
+   The file input is visually hidden (CSS); the card itself acts as
+   the dropzone/trigger. Applies to the request-form card and the
+   edit-modal card. */
+document.querySelectorAll('.req-upload-card').forEach(function (card) {
+    card.addEventListener('click', function (e) {
+        // Don't re-open the picker on the remove button / "view file" link
+        if (e.target.closest('.ruc-remove-btn') || e.target.closest('a')) return;
+        var input = card.querySelector('input[type="file"]');
+        if (input && !input.disabled) input.click();
+    });
+});
+
 /* ── Warn before leaving if the request form has unsaved input ── */
 (function () {
     function requestFormHasData() {
         var purpose = document.getElementById('purpose-input');
         var idInput = document.getElementById('new-id-input');
-        var alInput = document.getElementById('new-al-input');
         var selectedDoc = document.getElementById('selected-document-input');
 
         var hasPurpose = purpose && purpose.value.trim() !== '';
         var hasIdFile   = idInput && idInput.files && idInput.files.length > 0;
-        var hasAlFile   = alInput && alInput.files && alInput.files.length > 0;
         var hasDoc      = selectedDoc && selectedDoc.value !== '';
 
-        return hasPurpose || hasIdFile || hasAlFile || hasDoc;
+        return hasPurpose || hasIdFile || hasDoc;
     }
 
     window.addEventListener('beforeunload', function (e) {

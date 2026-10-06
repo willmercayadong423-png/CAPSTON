@@ -35,18 +35,24 @@ function ensure_document_types_table(mysqli $conn): void
           COMMENT='Requestable document types (admin-managed).'
     ");
 
-    // Seed: the five online-requestable documents. (SF10/Form 137, Diploma
-    // and YearBook were dropped entirely — in-person only, not listed.)
-    @$conn->query("
-        INSERT IGNORE INTO `document_types` (`name`, `requires_grade_level`, `is_active`, `sort_order`)
-        VALUES
-          ('Certificate of Enrollment',             1, 1, 1),
-          ('Certificate of Grades',                 1, 1, 2),
-          ('Certificate of Good Moral',             0, 1, 3),
-          ('Certificate of Transfer',               1, 1, 4),
-          ('Certificate of Completion/Graduation',  1, 1, 5)
-    ");
-
+    // Seed ONCE for fresh installs — never again afterwards. A settings
+    // marker records that seeding happened, so anything the Admin later
+    // deletes STAYS deleted. (INSERT IGNORE on every page load used to
+    // resurrect removed documents — that was the "it keeps coming back" bug.)
+    // "Certificate of Grades" was removed from the system entirely.
+    $seeded = @$conn->query("SELECT setting_value FROM site_settings WHERE setting_key = 'document_types_seeded'");
+    if ($seeded && $seeded->num_rows === 0) {
+        @$conn->query("
+            INSERT IGNORE INTO `document_types` (`name`, `requires_grade_level`, `is_active`, `sort_order`)
+            VALUES
+              ('Certificate of Enrollment',             1, 1, 1),
+              ('Certificate of Good Moral',              0, 1, 3),
+              ('Certificate of Transfer',                1, 1, 4),
+              ('Certificate of Completion/Graduation',   1, 1, 5)
+        ");
+        @$conn->query("INSERT IGNORE INTO `site_settings` (`setting_key`, `setting_value`)
+                      VALUES ('document_types_seeded', '1')");
+    }
     $ready = true;
 }
 

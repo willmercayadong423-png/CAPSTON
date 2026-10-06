@@ -21,12 +21,17 @@ try {
     );
 
     // Explicit column list — NEVER expose password hashes
+    // Schema v5: role name via roles, academic data via student_profiles
+    // (aliases keep the JSON keys the dashboard JS expects).
     $stmt = $pdo->query("
-        SELECT id, student_id, first_name, last_name, role, email, contact,
-               status, created_at, profile_photo,
-               lrn
-        FROM users
-        ORDER BY id DESC
+        SELECT u.id, sp.student_id, u.first_name, u.last_name,
+               r.role_name AS role, u.email, u.contact,
+               u.status, u.created_at, u.profile_photo,
+               sp.lrn
+        FROM users u
+        LEFT JOIN student_profiles sp ON sp.user_id = u.id
+        LEFT JOIN roles r            ON r.role_id  = u.role_id
+        ORDER BY u.id DESC
     ");
     $students = $stmt->fetchAll(PDO::FETCH_ASSOC);
 

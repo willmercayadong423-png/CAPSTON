@@ -25,7 +25,13 @@ if (!isset($_POST['student_id'])) {
 
 $id = trim($_POST['student_id']);
 
-$stmt = $conn->prepare("UPDATE users SET status = 'active' WHERE student_id = ?");
+// Schema v5: school numbers live in student_profiles — resolve then update by id
+$stmt = $conn->prepare("
+    UPDATE users u
+    JOIN student_profiles sp ON sp.user_id = u.id
+    SET u.status = 'active'
+    WHERE sp.student_id = ?
+");
 
 if (!$stmt) {
     error_log("unArch prepare failed: " . $conn->error);

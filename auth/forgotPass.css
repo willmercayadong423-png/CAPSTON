@@ -256,3 +256,4 @@ body {
     font-size: 10px; /* Reduced from 12px */
     margin-top: 2px;
 }
+.svgic { display: inline-block; vertical-align: -.18em; flex-shrink: 0; }

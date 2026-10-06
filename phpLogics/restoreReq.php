@@ -35,19 +35,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'
     // ── Guard: restoring must not create a second pending request of the
     // same document type (the new-request flow enforces the same rule). ──
     $dup = $conn->prepare(
-        "SELECT document_type FROM document_requests WHERE id = ? AND user_id = ?"
+        "SELECT document_type_id FROM document_requests WHERE id = ? AND user_id = ?"
     );
     $dup->bind_param("ii", $req_id, $student_id);
     $dup->execute();
-    $docType = (string)($dup->get_result()->fetch_assoc()['document_type'] ?? '');
+    $docTypeId = (int)($dup->get_result()->fetch_assoc()['document_type_id'] ?? 0);
     $dup->close();
 
-    if ($docType !== '') {
+    if ($docTypeId > 0) {
         $dup2 = $conn->prepare(
             "SELECT COUNT(*) AS cnt FROM document_requests
-             WHERE user_id = ? AND document_type = ? AND status = 'Pending' AND id != ?"
+             WHERE user_id = ? AND document_type_id = ? AND status = 'Pending' AND id != ?"
         );
-        $dup2->bind_param("isi", $student_id, $docType, $req_id);
+        $dup2->bind_param("iii", $student_id, $docTypeId, $req_id);
         $dup2->execute();
         $dupCnt = (int)$dup2->get_result()->fetch_assoc()['cnt'];
         $dup2->close();
@@ -61,9 +61,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'
     // ── Details for the registrar notification (fetched before the update) ──
     $info = null;
     $q = $conn->prepare(
-        "SELECT dr.document_type, dr.purpose,
+        "SELECT dt.name AS document_type, dr.purpose,
                 CONCAT(s.first_name,' ',s.last_name) AS student_name
          FROM document_requests dr
+         JOIN document_types dt ON dt.id = dr.document_type_id
          JOIN users s ON dr.user_id = s.id
          WHERE dr.id = ? AND dr.user_id = ?"
     );
@@ -76,7 +77,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'
     // cancelled_by / date_released are cleared so the row is clean again.
     $restore = $conn->prepare(
         "UPDATE document_requests
-         SET status = 'Pending', cancelled_by = NULL, rejection_reason = NULL, date_released = NULL
+         SET status = 'Pending', cancelled_by = NULL, rejection_reason = NULL, date_released = NULL,
+             registrar_viewed_at = NULL
          WHERE id = ? AND user_id = ? AND status = 'Cancelled'
            AND (cancelled_by = 'student' OR cancelled_by IS NULL OR cancelled_by = '')"
     );
@@ -97,9 +99,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'
         $reqNo = 'REQ-' . str_pad((string) $req_id, 4, '0', STR_PAD_LEFT);
         try {
             $regs = $conn->query(
-                "SELECT email, first_name, last_name FROM users
-                 WHERE LOWER(role) = 'registrar' AND LOWER(status) != 'archived'
-                   AND email IS NOT NULL AND email <> ''"
+                "SELECT u.email, u.first_name, u.last_name FROM users u
+                 JOIN roles r ON r.role_id = u.role_id
+                 WHERE LOWER(r.role_name) = 'registrar' AND LOWER(u.status) != 'archived'
+                   AND u.email IS NOT NULL AND u.email <> ''"
             );
             while ($regs && ($rg = $regs->fetch_assoc())) {
                 $res = send_registrar_request_email(

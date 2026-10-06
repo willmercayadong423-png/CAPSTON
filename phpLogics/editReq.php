@@ -1,4 +1,3 @@
-// ── editReq.php ─────────────────────────────────────────────────────────────
 <?php
 require("auth.php");
 include("../database/db.php");
@@ -26,6 +25,10 @@ $student_id = (int)$_SESSION['user_id'];
 $req_id     = (int)($_POST['req_id'] ?? 0);
 $doc_type   = trim($_POST['document_type'] ?? '');
 $purpose    = trim($_POST['purpose'] ?? '');
+if ($purpose === 'Other') {
+    // "Other — please specify" → use the free-text detail
+    $purpose = trim($_POST['purpose_other'] ?? '');
+}
 $syInput    = trim($_POST['school_year_last_attended'] ?? '');
 $glInput    = trim($_POST['grade_level'] ?? '');
 
@@ -40,10 +43,14 @@ if (!$req_id || empty($doc_type) || empty($purpose)) {
 
 // ── Verify this request belongs to the student and is still Pending ─
 // (fetched BEFORE the type checks so a removed current type stays editable)
+// Schema v5: the type is stored as document_type_id; the NAME is joined
+// back in as `document_type` so the checks below keep comparing names.
 $chk = $conn->prepare(
-    "SELECT id, document_type, purpose, grade_level, school_year_last_attended, id_photo
-     FROM document_requests
-     WHERE id = ? AND user_id = ? AND status = 'Pending'"
+    "SELECT dr.id, dr.document_type_id, dt.name AS document_type, dr.purpose,
+           dr.grade_level, dr.school_year_last_attended, dr.id_photo, dr.registrar_viewed_at
+     FROM document_requests dr
+     LEFT JOIN document_types dt ON dt.id = dr.document_type_id
+     WHERE dr.id = ? AND dr.user_id = ? AND dr.status = 'Pending'"
 );
 $chk->bind_param("ii", $req_id, $student_id);
 $chk->execute();
@@ -52,6 +59,14 @@ $chk->close();
 
 if (!$existing) {
     header("Location: ../student/dashboard.php?error=not_found");
+    exit();
+}
+
+// ── Review lock: once the registrar has opened this request's details,
+// the student may no longer edit it (the office is verifying these
+// exact fields). Cancelling is still allowed on the dashboard.
+if (!empty($existing['registrar_viewed_at'])) {
+    header("Location: ../student/dashboard.php?error=locked");
     exit();
 }
 
@@ -83,20 +98,56 @@ if ((int)($glMapAll[$doc_type] ?? 0) === 1 && $glInput === '') {
     exit();
 }
 
+// ── Dropdown format guards (the form now submits selects) ─────────
+// A request's own LEGACY free-text value may pass through unchanged;
+// only NEW values must come from the dropdown format.
+if ($syInput !== ($existing['school_year_last_attended'] ?? '')
+    && !preg_match('/^[0-9]{4}-[0-9]{4}$/', $syInput)) {
+    header("Location: ../student/dashboard.php?error=sy_invalid");
+    exit();
+}
+if ($glInput !== ''
+    && $glInput !== ($existing['grade_level'] ?? '')
+    && !preg_match('/^Grade [0-9]{1,2}$/', $glInput)) {
+    header("Location: ../student/dashboard.php?error=gl_invalid");
+    exit();
+}
+if (mb_strlen($purpose) < 3 || mb_strlen($purpose) > 255) {
+    header("Location: ../student/dashboard.php?error=purpose_invalid");
+    exit();
+}
+
+
+// ── Resolve the (validated) document name to its catalog id ──────
+// The name was just checked against the admin-managed list, so it always
+// resolves — the existing-id fallback only guards legacy edge cases.
+$typeIdStmt = $conn->prepare("SELECT id FROM document_types WHERE name = ? LIMIT 1");
+$typeIdStmt->bind_param("s", $doc_type);
+$typeIdStmt->execute();
+$newTypeId = $typeIdStmt->get_result()->fetch_row()[0] ?? null;
+$typeIdStmt->close();
+
+if ($newTypeId === null && $doc_type === ($existing['document_type'] ?? '')) {
+    $newTypeId = (int)$existing['document_type_id'];   // keep current type
+}
+if ($newTypeId === null) {
+    header("Location: ../student/dashboard.php?error=invalid_doc_type");
+    exit();
+}
 
 // ── Guard: changing the document type must not create a second pending
 // request of the same type (the new-request flow enforces the same rule). ──
-if ($doc_type !== $existing['document_type']) {
+if ((int)$newTypeId !== (int)$existing['document_type_id']) {
     // One active request per document type: switching this request to a type
     // the student already has Pending / Processing / Ready for Pickup /
     // Released is refused (the request being edited is excluded).
     $dup = $conn->prepare(
         "SELECT COUNT(*) AS cnt FROM document_requests
-         WHERE user_id = ? AND document_type = ?
+         WHERE user_id = ? AND document_type_id = ?
            AND status IN ('Pending','Processing','Ready for Pickup','Released')
            AND id != ?"
     );
-    $dup->bind_param("isi", $student_id, $doc_type, $req_id);
+    $dup->bind_param("iii", $student_id, $newTypeId, $req_id);
     $dup->execute();
     $dupCnt = (int)$dup->get_result()->fetch_assoc()['cnt'];
     $dup->close();
@@ -168,14 +219,14 @@ if (!empty($upload_errors)) {
 // ── Update the request in DB ───────────────────────────────────────
 $upd = $conn->prepare(
     "UPDATE document_requests
-     SET document_type = ?, purpose = ?, grade_level = ?, school_year_last_attended = ?, id_photo = ?
+     SET document_type_id = ?, purpose = ?, grade_level = ?, school_year_last_attended = ?, id_photo = ?
      WHERE id = ? AND user_id = ? AND status = 'Pending'"
 );
 $glValue = ($glInput !== '') ? $glInput : null;   // bind_param needs variables
 $syValue = ($syInput !== '') ? $syInput : null;
 $upd->bind_param(
-    "sssssii",
-    $doc_type,
+    "issssii",
+    $newTypeId,
     $purpose,
     $glValue,
     $syValue,

@@ -10,6 +10,7 @@
 require __DIR__ . "/../phpLogics/auth.php";
 include(__DIR__ . "/../database/db.php");
 include __DIR__ . "/../phpLogics/site_config.php";
+require_once __DIR__ . '/../phpLogics/icons.php';
 require_once __DIR__ . "/../phpLogics/mailer.php";
 require_once __DIR__ . "/../phpLogics/audit.php";
 
@@ -53,13 +54,88 @@ $docGlMap      = get_document_type_map($conn, false);  // ALL types (the edit
 
 
 // ── Fetch student info ─────────────────────────────────────────────
-$s = $conn->prepare("SELECT * FROM users WHERE id = ?");
+// Schema v5: role name via roles, academic data via student_profiles —
+// the aliases keep every $student[...] key below identical.
+$s = $conn->prepare("
+    SELECT u.*,
+           r.role_name                  AS role,
+           sp.student_id                AS student_id,
+           sp.lrn                       AS lrn,
+           sp.grade_level               AS grade_level,
+           sp.school_year_last_attended AS school_year_last_attended
+    FROM users u
+    LEFT JOIN roles r            ON r.role_id  = u.role_id
+    LEFT JOIN student_profiles sp ON sp.user_id = u.id
+    WHERE u.id = ?
+");
 $s->bind_param("i", $student_id);
 $s->execute();
 $student = $s->get_result()->fetch_assoc();
 $s->close();
 
 $studentName = htmlspecialchars($student['first_name'] . ' ' . $student['last_name']);
+
+// ── Latest request's academic details (display-only on My Account) ──
+// Grade Level and Last School Year Attended are per-request fields
+// (document_requests), so the account page shows the values from the
+// student's most recent request.
+$lastAcad = $conn->prepare(
+    "SELECT grade_level, school_year_last_attended
+     FROM document_requests
+     WHERE user_id = ?
+     ORDER BY date_requested DESC
+     LIMIT 1"
+);
+$lastAcad->bind_param("i", $student_id);
+$lastAcad->execute();
+$lastAcadRow    = $lastAcad->get_result()->fetch_assoc();
+$lastAcad->close();
+$displayGradeLevel = trim((string)($lastAcadRow['grade_level'] ?? ''));
+$displaySchoolYear = trim((string)($lastAcadRow['school_year_last_attended'] ?? ''));
+
+// ── Dropdown option sets (Request a Document + edit modal) ──────
+$gradeOptions = ['Grade 7', 'Grade 8', 'Grade 9', 'Grade 10', 'Grade 11', 'Grade 12'];
+
+$purposeOptions = [
+    'College Application',
+    'Scholarship Application',
+    'Employment / Job Application',
+    'Transfer to Another School',
+    'Board Examination Requirement',
+    'Passport / Travel Requirement',
+    'Personal Copy',
+];
+
+// School Years, newest first (Philippine SY runs June–March)
+$syLatest = (int)date('n') >= 6 ? (int)date('Y') : (int)date('Y') - 1;
+$syOptions = [];
+for ($y = $syLatest; $y >= 2015; $y--) {
+    $syOptions[] = $y . '-' . ($y + 1);
+}
+
+// Prefill from the account (fallback: latest request values)
+$presetGrade = trim((string)($student['grade_level'] ?? '')) ?: $displayGradeLevel;
+$presetSy    = trim((string)($student['school_year_last_attended'] ?? '')) ?: $displaySchoolYear;
+
+// Render <option>s; a saved value outside the list (legacy free-text)
+// is kept as an extra option so nothing is silently lost.
+function render_select_options(array $options, string $current = '', string $placeholder = ''): string
+{
+    $html = '';
+    if ($placeholder !== '') {
+        $html .= '<option value="">' . htmlspecialchars($placeholder) . '</option>';
+    }
+    if ($current !== '' && !in_array($current, $options, true)) {
+        $html .= '<option value="' . htmlspecialchars($current, ENT_QUOTES) . '" selected>'
+               . htmlspecialchars($current, ENT_QUOTES) . '</option>';
+    }
+    foreach ($options as $opt) {
+        $sel = ($opt === $current && $current !== '') ? ' selected' : '';
+        $html .= '<option value="' . htmlspecialchars($opt, ENT_QUOTES) . '"' . $sel . '>'
+               . htmlspecialchars($opt) . '</option>';
+    }
+    return $html;
+}
 
 // ── Handle: Update Account Info ────────────────────────────────────
 $updateSuccess = "";
@@ -140,58 +216,53 @@ if (isset($_FILES['profile_photo']) && $_FILES['profile_photo']['error'] === UPL
 
 
             if (empty($updateError)) {
-    $new_lrn        = trim($_POST['lrn'] ?? '');
+    // ── Student-editable profile fields ────────────────────────────
+    // The combined Name display / Student ID / LRN stay read-only
+    // (registrar-managed); First & Last name, Grade Level and Last
+    // School Year Attended are editable on the account.
     $new_first_name = trim($_POST['first_name'] ?? '');
     $new_last_name  = trim($_POST['last_name'] ?? '');
-
-    /* ── "Name" card support ─────────────────────────────────────
-     * The combined Name card (student_name) mirrors First/Last via JS.
-     * If the student edited ONLY the combined card (e.g. JS disabled),
-     * derive First/Last from it: first word = first name, rest = last. */
-    $origFirst  = trim((string)$student['first_name']);
-    $origLast   = trim((string)$student['last_name']);
-    $origFull   = trim($origFirst . ' ' . $origLast);
-    $fullInput  = trim((string)($_POST['student_name'] ?? ''));
-
-    $editedCombined = ($fullInput !== '' && $fullInput !== $origFull);
-    $editedSplit    = ($new_first_name !== $origFirst || $new_last_name !== $origLast);
-
-    if ($editedCombined && !$editedSplit && $fullInput !== '') {
-        $parts = preg_split('/\s+/', $fullInput);
-        $new_first_name = (string)array_shift($parts);
-        $new_last_name  = implode(' ', $parts);
-    }
-    // Missing values (blanked/tampered fields) → fall back to the full name
-    // (the first word always belongs to First Name; only the rest can fill Last)
-    if (($new_first_name === '' || $new_last_name === '') && $fullInput !== '') {
-        $parts     = preg_split('/\s+/', $fullInput);
-        $firstWord = (string)array_shift($parts);
-        if ($new_first_name === '') $new_first_name = $firstWord;
-        if ($new_last_name === '')  $new_last_name  = implode(' ', $parts);
-    }
+    $new_grade      = trim($_POST['grade_level'] ?? '');
+    $new_sy         = trim($_POST['school_year_last_attended'] ?? '');
 
     /* ── Validate (HTML "required" is bypassable — enforce server-side) ── */
     if ($new_first_name === '' || $new_last_name === '') {
         $updateError = "First and last name are required.";
     } elseif (mb_strlen($new_first_name) > 100 || mb_strlen($new_last_name) > 100) {
         $updateError = "First and last name must be 100 characters or fewer.";
-    } elseif ($new_lrn !== '' && !preg_match('/^[0-9]{1,12}$/', $new_lrn)) {
-        $updateError = "LRN must be up to 12 digits, numbers only.";
+    } elseif (mb_strlen($new_grade) > 20) {
+        $updateError = "Grade level must be 20 characters or fewer.";
+    } elseif (mb_strlen($new_sy) > 20) {
+        $updateError = "School year must be 20 characters or fewer.";
     }
 }
 
 if (empty($updateError)) {
+    $newGradeSql = ($new_grade !== '') ? $new_grade : null;   // bind_param needs variables
+    $newSySql    = ($new_sy    !== '') ? $new_sy    : null;
     $upd = $conn->prepare("UPDATE users
         SET email=?, contact=?, profile_photo=?,
-            lrn=?, first_name=?, last_name=?
+            first_name=?, last_name=?
         WHERE id=?");
     $upd->bind_param(
         "ssssssi",
         $new_email, $new_contact, $new_photo,
-        $new_lrn, $new_first_name, $new_last_name,
+        $new_first_name, $new_last_name,
         $student_id
     );
+    // Academic data lives in student_profiles (schema v5) — kept in sync
+    // in the same flow right after the identity update.
+    $updProfile = $conn->prepare("
+        INSERT INTO student_profiles (user_id, grade_level, school_year_last_attended)
+        VALUES (?, ?, ?)
+        ON DUPLICATE KEY UPDATE
+            grade_level               = COALESCE(VALUES(grade_level), grade_level),
+            school_year_last_attended = VALUES(school_year_last_attended)
+    ");
+    $updProfile->bind_param("iss", $student_id, $newGradeSql, $newSySql);
                 if ($upd->execute()) {
+                    $updProfile->execute();
+                    $updProfile->close();
                     // ── Apply the optional password change ──
                     if ($changePw && $newPass !== '') {
                         $hash = password_hash($newPass, PASSWORD_DEFAULT);
@@ -205,7 +276,18 @@ if (empty($updateError)) {
                         'Own profile updated' . (($changePw && $newPass !== '') ? ' (password changed)' : ''));
 
                     $updateSuccess = "Account information updated successfully.";
-                    $s2 = $conn->prepare("SELECT * FROM users WHERE id = ?");
+                    $s2 = $conn->prepare("
+                        SELECT u.*,
+                               r.role_name                  AS role,
+                               sp.student_id                AS student_id,
+                               sp.lrn                       AS lrn,
+                               sp.grade_level               AS grade_level,
+                               sp.school_year_last_attended AS school_year_last_attended
+                        FROM users u
+                        LEFT JOIN roles r            ON r.role_id  = u.role_id
+                        LEFT JOIN student_profiles sp ON sp.user_id = u.id
+                        WHERE u.id = ?
+                    ");
                     $s2->bind_param("i", $student_id);
                     $s2->execute();
                     $student     = $s2->get_result()->fetch_assoc();
@@ -250,7 +332,11 @@ $errorMsg   = "";
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_request'])) {
     $doc_type = trim($_POST['document_type']);
-    $purpose  = trim($_POST['purpose']);
+    $purpose  = trim($_POST['purpose'] ?? '');
+    if ($purpose === 'Other') {
+        // "Other — please specify" → use the free-text detail
+        $purpose = trim($_POST['purpose_other'] ?? '');
+    }
     $syInput  = trim($_POST['school_year_last_attended'] ?? '');
     $glInput  = trim($_POST['grade_level'] ?? '');
 
@@ -264,10 +350,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_request'])) {
         $errorMsg = "Please fill in all required fields.";
     } elseif (!in_array($doc_type, $documentTypes, true)) {
         $errorMsg = "Please select a valid document type.";
+    } elseif (!in_array($purpose, $purposeOptions, true)
+        && (mb_strlen($purpose) < 3 || mb_strlen($purpose) > 255)) {
+        $errorMsg = "Please select a purpose (or specify it under Other).";
     } elseif ($syInput === '') {
-        $errorMsg = "Please enter the School Year you last attended (e.g. 2024-2025).";
+        $errorMsg = "Please select the School Year you last attended.";
+    } elseif (!preg_match('/^[0-9]{4}-[0-9]{4}$/', $syInput)) {
+        $errorMsg = "Please select a valid School Year.";
     } elseif ($glRequired && $glInput === '') {
-        $errorMsg = "Please enter your Grade Level.";
+        $errorMsg = "Please select your Grade Level.";
+    } elseif ($glInput !== '' && !preg_match('/^Grade [0-9]{1,2}$/', $glInput)) {
+        $errorMsg = "Please select a valid Grade Level.";
     } else {
 
         // ── Limit: max 3 pending requests at once ──
@@ -284,9 +377,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_request'])) {
         // request for it is Pending, Processing, Ready for Pickup (legacy)
         // or Released. Only Cancelled / Rejected requests free the type up.
         $dupStmt = $conn->prepare(
-            "SELECT status FROM document_requests
-             WHERE user_id = ? AND document_type = ?
-               AND status IN ('Pending','Processing','Ready for Pickup','Released')
+            "SELECT dr.status
+             FROM document_requests dr
+             JOIN document_types dt ON dt.id = dr.document_type_id
+             WHERE dr.user_id = ? AND dt.name = ?
+               AND dr.status IN ('Pending','Processing','Ready for Pickup','Released')
              LIMIT 1"
         );
         $dupStmt->bind_param("is", $student_id, $doc_type);
@@ -338,17 +433,24 @@ if (!in_array($id_ext, $allowed_ext, true)) {
         if (!empty($upload_errors)) {
             $errorMsg = implode(' ', $upload_errors);
         } else {
+            // Resolve the (already-validated) document name to its catalog id
+            $typeIdStmt = $conn->prepare("SELECT id FROM document_types WHERE name = ? LIMIT 1");
+            $typeIdStmt->bind_param("s", $doc_type);
+            $typeIdStmt->execute();
+            $docTypeId = (int)($typeIdStmt->get_result()->fetch_row()[0] ?? 0);
+            $typeIdStmt->close();
+
             $ins = $conn->prepare(
                 "INSERT INTO document_requests
-                    (user_id, document_type, purpose, grade_level, school_year_last_attended, id_photo)
+                    (user_id, document_type_id, purpose, grade_level, school_year_last_attended, id_photo)
                  VALUES (?, ?, ?, ?, ?, ?)"
             );
             $glValue = ($glInput !== '') ? $glInput : null;      // bind_param needs variables
             $syValue = ($syInput !== '') ? $syInput : null;
             $ins->bind_param(
-                "isssss",
+                "iissss",
                 $student_id,
-                $doc_type,
+                $docTypeId,
                 $purpose,
                 $glValue,
                 $syValue,
@@ -359,6 +461,22 @@ if (!in_array($id_ext, $allowed_ext, true)) {
                 $newReqNo = 'REQ-' . str_pad((string) $conn->insert_id, 4, '0', STR_PAD_LEFT);
                 audit_log($conn, 'REQUEST_SUBMITTED', 'document_request', $newReqNo,
                     "{$doc_type} — Purpose: {$purpose}");
+
+                // ── Keep My Account's academic info in sync with this request ──
+                // The dropdowns prefill FROM the account; submitting with new
+                // values (e.g. Grade 10) updates the account automatically, so
+                // the student never has to edit My Account by hand. Grade Level
+                // only overwrites when the document actually asked for it.
+                $acct = $conn->prepare("
+                    INSERT INTO student_profiles (user_id, grade_level, school_year_last_attended)
+                    VALUES (?, ?, ?)
+                    ON DUPLICATE KEY UPDATE
+                        grade_level               = COALESCE(VALUES(grade_level), grade_level),
+                        school_year_last_attended = VALUES(school_year_last_attended)
+                ");
+                $acct->bind_param('iss', $student_id, $glValue, $syValue);
+                $acct->execute();
+                $acct->close();
 
                 // ── Email the student a confirmation that the request was received ──
                 $conf = send_status_email(
@@ -373,9 +491,10 @@ if (!in_array($id_ext, $allowed_ext, true)) {
                 }
                 try {
                     $regs = $conn->query(
-                        "SELECT email, first_name, last_name FROM users
-                         WHERE LOWER(role) = 'registrar' AND LOWER(status) != 'archived'
-                           AND email IS NOT NULL AND email <> ''"
+                        "SELECT u.email, u.first_name, u.last_name FROM users u
+                         JOIN roles r ON r.role_id = u.role_id
+                         WHERE LOWER(r.role_name) = 'registrar' AND LOWER(u.status) != 'archived'
+                           AND u.email IS NOT NULL AND u.email <> ''"
                     );
                     while ($regs && ($rg = $regs->fetch_assoc())) {
                         $res = send_registrar_request_email(
@@ -430,6 +549,10 @@ if (empty($errorMsg) && isset($_GET['error'])) {
         'dup_pending'      => 'You already have an active request for that document type (pending, processing, or released). You can request it again only after it is cancelled or rejected.',
         'pending_limit'    => 'Restoring would exceed the 3-pending-request limit. Please wait for one to be processed.',
         'restore_failed'   => 'This request cannot be restored — it was rejected by the registrar and only they can reopen it.',
+        'locked'           => "This request was already reviewed by the Registrar — it can no longer be edited. You may still cancel it or visit the Registrar's Office.",
+        'sy_invalid'       => 'Please select a valid School Year.',
+        'gl_invalid'       => 'Please select a valid Grade Level.',
+        'purpose_invalid'  => 'Please select a purpose (or specify it under Other).',
         'not_found'        => 'That request can no longer be edited — it may have already been processed.',
         'db_fail'          => 'Something went wrong. Please try again.',
         default            => 'An error occurred. Please try again.',
@@ -437,7 +560,13 @@ if (empty($errorMsg) && isset($_GET['error'])) {
 }
 
 // ── Fetch requests ─────────────────────────────────────────────────
-$req = $conn->prepare("SELECT * FROM document_requests WHERE user_id = ? ORDER BY date_requested DESC");
+$req = $conn->prepare("
+    SELECT dr.*, dt.name AS document_type
+    FROM document_requests dr
+    LEFT JOIN document_types dt ON dt.id = dr.document_type_id
+    WHERE dr.user_id = ?
+    ORDER BY dr.date_requested DESC
+");
 $req->bind_param("i", $student_id);
 $req->execute();
 $myRequests = $req->get_result()->fetch_all(MYSQLI_ASSOC);
@@ -496,7 +625,7 @@ foreach ($announcements as $ann) {
         'date_str'         => date('M d, Y · h:i A', $createdTime),
         'badge'            => 'Announcement',
         'badge_cls'        => 'badge-announcement',
-        'icon'             => '📢',
+        'icon'             => 'megaphone',
         'rejection_reason' => null,
         'req_id'           => null,
         'e_cert'           => false,
@@ -521,7 +650,7 @@ foreach ($myRequests as $r) {
             'date_str'         => date('M d, Y · h:i A', $reqTime),
             'badge'            => 'Pending Review',
             'badge_cls'        => 'badge-pending',
-            'icon'             => '⏳',
+            'icon'             => 'hourglass',
             'rejection_reason' => null,
             'req_id'           => $r['id'],
             'e_cert'           => false,
@@ -537,7 +666,7 @@ foreach ($myRequests as $r) {
             'date_str'         => date('M d, Y · h:i A', $procTime),
             'badge'            => 'Processing',
             'badge_cls'        => 'badge-processing',
-            'icon'             => '⚙️',
+            'icon'             => 'loader',
             'rejection_reason' => null,
             'req_id'           => $r['id'],
             'e_cert'           => false,
@@ -554,7 +683,7 @@ foreach ($myRequests as $r) {
             'date_str'         => date('M d, Y · h:i A', $relTime),
             'badge'            => 'Released',
             'badge_cls'        => 'badge-released',
-            'icon'             => '🎓',
+            'icon'             => 'award',
             'rejection_reason' => null,
             'req_id'           => $r['id'],
             'e_cert'           => $hasCert,
@@ -572,7 +701,7 @@ foreach ($myRequests as $r) {
                 'date_str'         => date('M d, Y · h:i A', $canTime),
                 'badge'            => 'Rejected',
                 'badge_cls'        => 'badge-rejected',
-                'icon'             => '❌',
+                'icon'             => 'x-circle',
                 'rejection_reason' => $reason ?: null,
                 'req_id'           => $r['id'],
                 'e_cert'           => false,
@@ -587,7 +716,7 @@ foreach ($myRequests as $r) {
                 'date_str'         => date('M d, Y · h:i A', $canTime),
                 'badge'            => 'Cancelled',
                 'badge_cls'        => 'badge-cancelled',
-                'icon'             => '🚫',
+                'icon'             => 'ban',
                 'rejection_reason' => null,
                 'req_id'           => $r['id'],
                 'e_cert'           => false,
@@ -619,6 +748,10 @@ function badgeClass($status, $cancelledBy = '')
 }
 
 $activeView     = $_GET['view'] ?? 'dashboard';
+// Whitelist — an unknown ?view= value would otherwise hide every view
+if (!in_array($activeView, ['dashboard', 'requests', 'request', 'notifications', 'account'], true)) {
+    $activeView = 'dashboard';
+}
 $activeTab      = $_GET['tab']  ?? 'main';
 $profilePhoto   = !empty($student['profile_photo']) ? $student['profile_photo'] : null;
 // DB paths are web-root-relative ("uploads/..."); this page sits one level
@@ -632,7 +765,7 @@ $avatarInitials = strtoupper(substr($student['first_name'], 0, 1) . substr($stud
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>My Dashboard — HEHMS</title>
+    <title>Student Portal — HEHMS</title>
     <script>
         // One-time cleanup: dark mode has been removed, but some browsers
         // may still have 'hehms-theme: dark' saved from before. Clear it
@@ -640,400 +773,347 @@ $avatarInitials = strtoupper(substr($student['first_name'], 0, 1) . substr($stud
         localStorage.removeItem('hehms-theme');
         document.documentElement.removeAttribute('data-theme');
     </script>
-    <link rel="stylesheet" href="dashb.css">
-    <link rel="stylesheet" href="../assets/css/scroll-table.css">
+    <link rel="stylesheet" href="portal.css?v=2">
     <?php echo theme_head(); // admin-managed brand color ?>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
-    
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 </head>
 
 <body>
 
-    <!-- ══ HEADER ══ -->
-    <div class="header">
-        <a href="dashboard.php" class="header-left">
-    <img src="<?php echo site_logo_url(); ?>" alt="School Logo" class="logo-img">
-
-    <div class="school-info">
-        <h2>Hilario E. Hermosa Memorial High School</h2>
-        <p>Siclong Laur, Nueva Ecija</p>
-    </div>
-</a>
-
-        
-      <div class="header-right">
-
-    <!-- Student Name -->
-   <div class="header-profile-name">
-    <span><?php echo $studentName; ?></span>
-</div>
-
-    <!-- Avatar -->
-    <div class="header-avatar-wrapper">
-
-      <div class="header-avatar"
-           onclick="toggleProfileMenu(event)"
-           style="cursor:pointer;"
-           title="Account, Notifications & Options">
-        <?php if ($profilePhoto): ?>
-            <img src="<?php echo htmlspecialchars($profilePhotoUrl); ?>" alt="avatar">
-        <?php else: ?>
-            <?php echo $avatarInitials; ?>
-        <?php endif; ?>
-        <?php if ($totalNotifs > 0): ?>
-            <span class="avatar-badge" id="avatarNotifBadge" title="<?php echo $totalNotifs; ?> notifications"><?php echo $totalNotifs > 99 ? '99+' : $totalNotifs; ?></span>
-        <?php endif; ?>
-      </div>
-
-        <div class="profile-dropdown" id="profileDropdown">
-            <div class="profile-dropdown-user">
-                <div class="pdu-name"><?php echo $studentName; ?></div>
-                <div class="pdu-id">Student ID: <?php echo htmlspecialchars($student['student_id'] ?? '—'); ?></div>
-            </div>
-            <div class="profile-dropdown-divider"></div>
-            <a href="#" onclick="showView('account'); closeProfileMenu();" class="profile-dropdown-item">
-                <span class="pdi-icon">👤</span>
-                <span class="pdi-label">Account Information</span>
+    <!-- ══ TOP BAR ══ -->
+    <header class="topbar">
+        <div class="topbar-inner">
+            <a href="dashboard.php" class="brand">
+                <img src="<?php echo site_logo_url(); ?>" alt="School logo">
+                <div class="brand-text">
+                    <strong>Hilario E. Hermosa Memorial High School</strong>
+                    <span>Student Portal</span>
+                </div>
             </a>
-            <a href="#" onclick="showView('notifications'); closeProfileMenu();" class="profile-dropdown-item notif-dropdown-item">
-                <span class="pdi-icon">🔔</span>
-                <span class="pdi-label">Notifications</span>
-                <?php if ($totalNotifs > 0): ?>
-                    <span class="pdi-badge" id="dropdownNotifBadge"><?php echo $totalNotifs > 99 ? '99+' : $totalNotifs; ?></span>
-                <?php endif; ?>
-            </a>
-            <div class="profile-dropdown-divider"></div>
-            <a href="../phpLogics/Logout.php" class="profile-dropdown-item pdi-logout">
-                <span class="pdi-icon">🚪</span>
-                <span class="pdi-label">Logout</span>
-            </a>
-        </div>
 
-    </div>
+            <div class="topbar-actions">
+                <div class="notif-panel-wrapper">
+                    <button type="button" class="bell" onclick="toggleNotifPanel(event)"
+                        title="Notifications">
+                        <?php echo icon('bell', 19); ?>
+                        <?php if ($totalNotifs > 0): ?>
+                            <span class="avatar-badge" id="avatarNotifBadge"
+                                title="<?php echo $totalNotifs; ?> notifications"><?php echo $totalNotifs > 99 ? '99+' : $totalNotifs; ?></span>
+                        <?php endif; ?>
+                    </button>
 
-</div>
-    </div>
-
-    <div class="body-layout">
-
-        <!-- ══ SIDEBAR ══ -->
-        <aside class="sidebar">
-           <div class="sidebar-brand">
-    <div class="welcome-card">
-
-        <div class="welcome-avatar">
-            <?php if ($profilePhoto): ?>
-                <img src="<?php echo htmlspecialchars($profilePhotoUrl); ?>" alt="Profile Avatar">
-            <?php else: ?>
-                <?php echo htmlspecialchars($avatarInitials); ?>
-            <?php endif; ?>
-        </div>
-
-        <div class="welcome-info">
-            <span class="welcome-text">Welcome back</span>
-            <h3><?php echo htmlspecialchars($studentName); ?></h3>
-         
-        </div>
-
-    </div>
-</div>
-            <nav class="sidebar-nav">
-                <div class="nav-group-label">Main Menus</div>
-
-  <a onclick="showView('dashboard')" id="nav-dashboard"
-                    class="nav-main-item dashboard <?php echo $activeView === 'dashboard' ? 'active' : ''; ?>">
-                    <div class="nmi-icon">🏠</div>
-                    <div class="nmi-text">
-                        <div class="nmi-title">Dashboard</div>
-                        
+                    <!-- Notification dropdown panel -->
+                    <div class="notif-panel" id="notifPanel">
+                        <div class="notif-panel-head">
+                            <h3>Notifications</h3>
+                            <button type="button" class="np-mark-read" onclick="markAllNotifsAsRead()">
+                                <?php echo icon('check', 12); ?> Mark all read
+                            </button>
+                        </div>
+                        <div class="notif-panel-list">
+                            <?php if (empty($notifications)): ?>
+                                <div class="np-empty">
+                                    <div class="np-empty-icon"><?php echo icon('bell', 26); ?></div>
+                                    <p>No notifications yet</p>
+                                </div>
+                            <?php else: foreach (array_slice($notifications, 0, 6) as $n): ?>
+                                <div class="np-item" data-time="<?php echo (int)$n['time']; ?>">
+                                    <span class="np-icon <?php echo htmlspecialchars($n['badge_cls']); ?>"><?php echo icon($n['icon'], 15); ?></span>
+                                    <div class="np-body">
+                                        <div class="np-title">
+                                            <?php echo htmlspecialchars($n['title']); ?>
+                                            <span class="np-badge <?php echo htmlspecialchars($n['badge_cls']); ?>"><?php echo htmlspecialchars($n['badge']); ?></span>
+                                        </div>
+                                        <div class="np-text"><?php echo htmlspecialchars($n['body']); ?></div>
+                                        <div class="np-time"><?php echo htmlspecialchars($n['date_str']); ?></div>
+                                    </div>
+                                </div>
+                            <?php endforeach; ?>
+                            <?php endif; ?>
+                        </div>
+                        <a href="#" class="notif-panel-foot" onclick="showView('notifications'); closeNotifPanel();">
+                            View all notifications <?php echo icon('chevron-right', 14); ?>
+                        </a>
                     </div>
-                </a>
-           
-
-
-  <a onclick="showView('requests')" id="nav-requests"
-                    class="nav-main-item requests <?php echo $activeView === 'requests' ? 'active' : ''; ?>">
-                    <div class="nmi-icon">📋</div>
-                    <div class="nmi-text">
-                        <div class="nmi-title">My Requests</div>
-                        
-                    </div>
-                </a>
-
-
-
-                          <a onclick="showView('request')" id="nav-request"
-   class="nav-main-item <?php echo $activeView === 'request' ? 'active' : ''; ?>">
-    <div class="nmi-icon">📝</div>
-    <div class="nmi-text">
-        <div class="nmi-title">Request Document</div>
-       
-    </div>
-</a>
-                <a onclick="showView('notifications')" id="nav-notifications"
-                    class="nav-main-item <?php echo $activeView === 'notifications' ? 'active' : ''; ?>">
-                    <div class="nmi-icon">🔔</div>
-                    <div class="nmi-text">
-                        <div class="nmi-title">Notifications</div>
-                    </div>
-                    <?php if ($totalNotifs > 0): ?>
-                        <span class="sidebar-notif-pill" id="sidebarNotifPill"><?php echo $totalNotifs > 99 ? '99+' : $totalNotifs; ?></span>
-                    <?php endif; ?>
-                </a>
-
-                <a onclick="showView('account')" id="nav-account"
-                    class="nav-main-item records <?php echo $activeView === 'account' ? 'active' : ''; ?>">
-                    <div class="nmi-icon">👤</div>
-                    <div class="nmi-text">
-                        <div class="nmi-title">Account Information</div>
-                       
-                    </div>
-                </a>
-      
-                <div class="nav-divider"></div>
-                <div class="nav-group-label">Others</div>
-            <a href="../phpLogics/Logout.php" class="nav-main-item logout">
-    <div class="nmi-icon">↩️</div>
-    <div class="nmi-text">
-        <div class="nmi-title">LOGOUT</div>
-       
-    </div>
-</a>
-                   
-
-            </nav>
-        </aside>
-        
-
-
-
-        
-
-        <!-- ══ MAIN ══ -->
-        <div class="main-container">
-
-
-
-<!-- ════ VIEW 1: Dashboard ════ -->
-<div id="view-dashboard" style="display:<?php echo $activeView === 'dashboard' ? 'block' : 'none'; ?>;">
-
-    <!-- Page Banner -->
-    <div class="page-banner">
-        <div class="page-banner-icon">🏠</div>
-
-        <div class="page-banner-content">
-            <h1>Student <span>Dashboard</span></h1>
-            <p>Welcome to the HEHMS Online Credential Request System.</p>
-        </div>
-    </div>
-
-   <!-- Welcome Card -->
-<div class="dashboard-card">
-    <h2 class="card-title">You can request school documents, monitor your request status, and stay updated with school announcements.</h2>
-    <Br>
-    <div class="cards cards-3">
-        <div class="card card-click" data-goto="" data-view="main" title="Show all of my requests">
-            <span class="card-icon">📋</span><h4>Total Requests</h4><h2><?php echo $cntTotal; ?></h2>
-        </div>
-        <div class="card card-click" data-goto="Pending" data-view="main" title="Show my pending requests">
-            <span class="card-icon">⏳</span><h4>Pending</h4><h2><?php echo $cntPending; ?></h2>
-        </div>
-        <div class="card card-click" data-goto="Processing" data-view="main" title="Show my processing requests">
-            <span class="card-icon">⚙️</span><h4>Processing</h4><h2><?php echo $cntProcessing; ?></h2>
-        </div>
-        <div class="card card-click" data-goto="Released" data-view="archived" title="Show my released requests">
-            <span class="card-icon">✅</span><h4>Released</h4><h2><?php echo $cntReleased; ?></h2>
-        </div>
-        <div class="card card-click" data-goto="Rejected" data-view="archived" title="Show requests rejected by the registrar">
-            <span class="card-icon">🚫</span><h4>Rejected</h4><h2><?php echo $cntRejected; ?></h2>
-        </div>
-        <div class="card card-click" data-goto="Cancelled" data-view="archived" title="Show my cancelled requests">
-            <span class="card-icon">❌</span><h4>Cancelled</h4><h2><?php echo $cntCancelled; ?></h2>
-        </div>
-    </div>
-
-    <div class="dashboard-grid">
-        <div class="dashboard-card">
-            <h3>📢 Announcements</h3>
-            <ul class="dashboard-list">
-                <?php if (empty($announcements)): ?>
-                    <li>No new announcements.</li>
-                    <li>Check back regularly for updates.</li>
-                <?php else: foreach ($announcements as $a): ?>
-                    <li>
-                        <strong><?php echo htmlspecialchars($a['title']); ?></strong>
-                        <small> — <?php echo date('M d, Y', strtotime($a['created_at'])); ?></small><br>
-                        <?php echo nl2br(htmlspecialchars($a['message'])); ?>
-                    </li>
-                <?php endforeach; endif; ?>
-            </ul>
-        </div>
-
-        <div class="dashboard-card">
-            <h3>🕒 Office Hours</h3>
-            <p><?php echo htmlspecialchars(site_setting('office_hours', 'Monday to Friday, 8:00 AM – 4:00 PM')); ?></p>
-            <p style="margin-top:10px;">Closed during weekends and holidays.</p>
-        </div>
-
-        <div class="dashboard-card full-width">
-            <h3>☎ Contact Information</h3>
-            <p><strong>Registrar's Office</strong></p>
-            <p>Email: <?php echo htmlspecialchars(site_setting('contact_email', 'registrar@hehms.edu.ph')); ?></p>
-            <p>Phone: <?php echo htmlspecialchars(site_setting('contact_phone', '(044) 123-4567')); ?></p>
-            <p>Location: <?php echo htmlspecialchars(site_setting('contact_location', 'Hilario E. Hermosa Memorial High School, Siclong, Laur, Nueva Ecija')); ?></p>
-        </div>
-    </div>
-
-    <button class="save-btn" type="button" onclick="showView('request')">📝 Request New Document</button>
-</div>
-</div>
-
-
-
-
-
-
-
-
-
-
-
-
-            <!-- ════ VIEW 2: REQUESTS ════ -->
-            <div id="view-requests" style="display:<?php echo $activeView === 'requests' ? 'block' : 'none'; ?>;">
-                <div class="page-banner">
-    <div class="page-banner-icon">
-        📋
-    </div>
-
-    <div class="page-banner-content">
-        <h1>My <span>Requests</span></h1>
-        <p>Track the status of your requested documents.</p>
-    </div>
-</div>
-                <?php if ($successMsg): ?>
-                    <div class="alert alert-success">✔ <?php echo htmlspecialchars($successMsg); ?></div>
-                <?php endif; ?>
-
-                <?php if ($errorMsg): ?>
-                    <div class="alert alert-danger">⚠️ <?php echo htmlspecialchars($errorMsg); ?></div>
-                <?php endif; ?>
-
-              
-
-                <div class="switch-btn">
-                    <a class="<?php echo $activeTab === 'main' ? 'active' : ''; ?>" id="tab-main" onclick="switchTable('main')">Main</a>
-                    <a class="<?php echo $activeTab === 'archived' ? 'active' : ''; ?>" id="tab-archived" onclick="switchTable('archived')">History</a>
                 </div>
 
-                <!-- Active requests -->
-                <div class="container" id="tbl-main" style="display:<?php echo $activeTab === 'archived' ? 'none' : ''; ?>;">
-                    <div class="table-header">
-                        <h3>Active Requests</h3>
-                        <div class="table-header-controls">
-                            <div class="search-wrapper">
-                                <span class="search-icon">🔍</span>
-                                <input type="text" class="search" placeholder="Search requests..."
-                                    oninput="filterRows('main-tbody', this.value)">
-                            </div>
-                            <button class="btn-new-request" onclick="showView('request')">✚ New Request</button>
+                <div class="header-avatar-wrapper">
+                    <div class="header-avatar" onclick="toggleProfileMenu(event)"
+                        title="Account menu">
+                        <?php if ($profilePhoto): ?>
+                            <img src="<?php echo htmlspecialchars($profilePhotoUrl); ?>" alt="avatar">
+                        <?php else: ?>
+                            <?php echo $avatarInitials; ?>
+                        <?php endif; ?>
+                    </div>
+
+                    <div class="profile-dropdown" id="profileDropdown">
+                        <div class="profile-dropdown-user">
+                            <div class="pdu-name"><?php echo $studentName; ?></div>
+                            <div class="pdu-id">Student ID: <?php echo htmlspecialchars($student['student_id'] ?? '—'); ?></div>
                         </div>
+                        <div class="profile-dropdown-divider"></div>
+                        <a href="#" onclick="showView('account'); closeProfileMenu();" class="profile-dropdown-item">
+                            <span class="pdi-icon"><?php echo icon('user', 15); ?></span>
+                            <span class="pdi-label">My Account</span>
+                        </a>
+                        <a href="#" onclick="showView('notifications'); closeProfileMenu();" class="profile-dropdown-item notif-dropdown-item">
+                            <span class="pdi-icon"><?php echo icon('bell', 15); ?></span>
+                            <span class="pdi-label">Notifications</span>
+                            <?php if ($totalNotifs > 0): ?>
+                                <span class="pdi-badge" id="dropdownNotifBadge"><?php echo $totalNotifs > 99 ? '99+' : $totalNotifs; ?></span>
+                            <?php endif; ?>
+                        </a>
+                        <div class="profile-dropdown-divider"></div>
+                        <a href="../phpLogics/Logout.php" class="profile-dropdown-item pdi-logout">
+                            <span class="pdi-icon"><?php echo icon('logout', 15); ?></span>
+                            <span class="pdi-label">Logout</span>
+                        </a>
                     </div>
-                    <!-- Status filter chips -->
-                    <div class="filter-chips" id="chips-main">
-                        <button type="button" class="chip active" data-filter="">All</button>
-                        <button type="button" class="chip" data-filter="Pending">⏳ Pending</button>
-                        <button type="button" class="chip" data-filter="Processing">⚙️ Processing</button>
+                </div>
+            </div>
+        </div>
+
+    </header>
+
+    <div class="shell">
+
+        <!-- Main navigation — left sidebar -->
+        <aside class="sidebar">
+            <nav class="tabs">
+            <a onclick="showView('dashboard')" id="nav-dashboard"
+                class="ptab <?php echo $activeView === 'dashboard' ? 'active' : ''; ?>"><?php echo icon('home', 16); ?> Home</a>
+            <a onclick="showView('requests')" id="nav-requests"
+                class="ptab <?php echo $activeView === 'requests' ? 'active' : ''; ?>"><?php echo icon('clipboard', 16); ?> My Requests</a>
+            <a onclick="showView('request')" id="nav-request"
+                class="ptab <?php echo $activeView === 'request' ? 'active' : ''; ?>"><?php echo icon('plus', 16); ?> Request a Document</a>
+            <a onclick="showView('account')" id="nav-account"
+                class="ptab <?php echo $activeView === 'account' ? 'active' : ''; ?>"><?php echo icon('settings', 16); ?> My Account</a>
+
+            <a href="../phpLogics/Logout.php" class="ptab ptab-logout"
+                title="Log out of the Student Portal"><?php echo icon('logout', 16); ?> Logout</a>
+            </nav>
+        </aside>
+
+        <main class="page">
+
+        <!-- ══════ VIEW: HOME ══════ -->
+        <div id="view-dashboard" style="display:<?php echo $activeView === 'dashboard' ? 'block' : 'none'; ?>;">
+
+            <div class="home-hero">
+                <div class="hero-text">
+                    <span class="hero-date"><?php echo date('l, F j, Y'); ?></span>
+                    <h1>Hello, <?php echo htmlspecialchars($student['first_name'] ?? 'Student'); ?>!</h1>
+                    <p>Request school documents online and track them in one place.</p>
+                </div>
+                <button type="button" class="hero-cta" onclick="showView('request')"><?php echo icon('plus', 18); ?> Request a Document</button>
+            </div>
+
+            <!-- Status tiles (clickable → filtered list) -->
+            <div class="stat-grid">
+                <div class="stat-tile card-click st-total" data-goto="" data-view="main" title="Show all of my requests">
+                    <div class="st-row">
+                        <span class="st-icon"><?php echo icon('clipboard', 17); ?></span>
+                        <h2><?php echo $cntTotal; ?></h2>
                     </div>
-                    <div class="tbl-scroll-wrap">
-                        <table class="tbl-x" style="min-width: 900px;">
+                    <h4>Total Requests</h4>
+                </div>
+                <div class="stat-tile card-click st-pending" data-goto="Pending" data-view="main" title="Show my pending requests">
+                    <div class="st-row">
+                        <span class="st-icon"><?php echo icon('hourglass', 17); ?></span>
+                        <h2><?php echo $cntPending; ?></h2>
+                    </div>
+                    <h4>Pending</h4>
+                </div>
+                <div class="stat-tile card-click st-processing" data-goto="Processing" data-view="main" title="Show my processing requests">
+                    <div class="st-row">
+                        <span class="st-icon"><?php echo icon('loader', 17); ?></span>
+                        <h2><?php echo $cntProcessing; ?></h2>
+                    </div>
+                    <h4>Processing</h4>
+                </div>
+                <div class="stat-tile card-click st-released" data-goto="Released" data-view="archived" title="Show my released requests">
+                    <div class="st-row">
+                        <span class="st-icon"><?php echo icon('check-circle', 17); ?></span>
+                        <h2><?php echo $cntReleased; ?></h2>
+                    </div>
+                    <h4>Released</h4>
+                </div>
+                <div class="stat-tile card-click st-rejected" data-goto="Rejected" data-view="archived" title="Show rejected requests">
+                    <div class="st-row">
+                        <span class="st-icon"><?php echo icon('ban', 17); ?></span>
+                        <h2><?php echo $cntRejected; ?></h2>
+                    </div>
+                    <h4>Rejected</h4>
+                </div>
+                <div class="stat-tile card-click st-cancelled" data-goto="Cancelled" data-view="archived" title="Show my cancelled requests">
+                    <div class="st-row">
+                        <span class="st-icon"><?php echo icon('x-circle', 17); ?></span>
+                        <h2><?php echo $cntCancelled; ?></h2>
+                    </div>
+                    <h4>Cancelled</h4>
+                </div>
+            </div>
+
+            <div class="home-grid">
+                <div class="card">
+                    <h3><?php echo icon('megaphone', 16); ?> Announcements</h3>
+                    <?php if (empty($announcements)): ?>
+                        <p class="card-sub">No announcements right now — check back later.</p>
+                    <?php else: foreach (array_slice($announcements, 0, 5) as $a): ?>
+                        <div class="announce-item">
+                            <div><span class="a-title"><?php echo htmlspecialchars($a['title']); ?></span><span class="a-date"><?php echo date('M d, Y', strtotime($a['created_at'])); ?></span></div>
+                            <div class="a-body"><?php echo nl2br(htmlspecialchars($a['message'])); ?></div>
+                        </div>
+                    <?php endforeach; ?>
+                        <button type="button" class="btn btn-ghost" style="margin-top:10px;" onclick="showView('notifications')">See all updates <?php echo icon('chevron-right', 14); ?></button>
+                    <?php endif; ?>
+                </div>
+
+                <div class="card">
+                    <h3><?php echo icon('building', 16); ?> Registrar's Office</h3>
+                    <div class="info-row"><span class="ic"><?php echo icon('clock', 15); ?></span><div><strong>Office hours</strong><?php echo htmlspecialchars(site_setting('office_hours', 'Monday to Friday, 8:00 AM – 4:00 PM')); ?></div></div>
+                    <div class="info-row"><span class="ic"><?php echo icon('mail', 15); ?></span><div><strong>Email</strong><?php echo htmlspecialchars(site_setting('contact_email', 'registrar@hehms.edu.ph')); ?></div></div>
+                    <div class="info-row"><span class="ic"><?php echo icon('phone', 15); ?></span><div><strong>Phone</strong><?php echo htmlspecialchars(site_setting('contact_phone', '(044) 123-4567')); ?></div></div>
+                    <div class="info-row"><span class="ic"><?php echo icon('map-pin', 15); ?></span><div><strong>Location</strong><?php echo htmlspecialchars(site_setting('contact_location', 'Siclong, Laur, Nueva Ecija')); ?></div></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ══════ VIEW: MY REQUESTS ══════ -->
+        <div id="view-requests" style="display:<?php echo $activeView === 'requests' ? 'block' : 'none'; ?>;">
+            <div class="view-head">
+                <h1>My <span>Requests</span></h1>
+                <p>Track every document you've requested. Pending requests can still be edited or cancelled.</p>
+            </div>
+
+            <?php if ($successMsg): ?>
+                <div class="alert alert-success"><?php echo icon('check-circle', 15); ?> <?php echo htmlspecialchars($successMsg); ?></div>
+            <?php endif; ?>
+            <?php if ($errorMsg): ?>
+                <div class="alert alert-danger"><?php echo icon('alert', 15); ?> <?php echo htmlspecialchars($errorMsg); ?></div>
+            <?php endif; ?>
+
+            <div class="switch-btn">
+                <a class="<?php echo $activeTab === 'main' ? 'active' : ''; ?>" id="tab-main" onclick="switchTable('main')">Active</a>
+                <a class="<?php echo $activeTab === 'archived' ? 'active' : ''; ?>" id="tab-archived" onclick="switchTable('archived')">History</a>
+            </div>
+
+            <!-- Active requests -->
+            <div class="container" id="tbl-main" style="display:<?php echo $activeTab === 'archived' ? 'none' : ''; ?>;">
+                <div class="table-header">
+                    <h3>Active Requests</h3>
+                    <div class="table-header-controls">
+                        <div class="search-wrapper">
+                            <span class="search-icon"><?php echo icon('search', 13); ?></span>
+                            <input type="text" class="search" placeholder="Search…"
+                                oninput="filterRows('main-tbody', this.value)">
+                        </div>
+                        <button type="button" class="btn-new-request" onclick="showView('request')"><?php echo icon('plus', 14); ?> New Request</button>
+                    </div>
+                </div>
+                <div class="filter-chips" id="chips-main">
+                    <button type="button" class="chip active" data-filter="">All</button>
+                    <button type="button" class="chip" data-filter="Pending"><?php echo icon('hourglass', 13); ?> Pending</button>
+                    <button type="button" class="chip" data-filter="Processing"><?php echo icon('loader', 13); ?> Processing</button>
+                </div>
+                <div class="tbl-scroll-wrap">
+                    <table class="tbl-x" style="min-width: 860px;">
                         <thead>
                             <tr>
                                 <th>Request ID</th>
-                                <th>Name</th>
                                 <th>Document</th>
                                 <th>Date Requested</th>
                                 <th>Status</th>
                                 <th>Action</th>
                             </tr>
                         </thead>
-                            <tbody id="main-tbody">
-                                <?php if (empty($mainRequests)): ?>
-                                    <tr>
-                                        <td colspan="6">
-                                            <div class="empty-state">
-                                                <div class="empty-icon">📭</div>
-                                                <p>No active requests.<br>Click <strong>Request Document</strong> to get started.</p>
-                                            </div>
-                                        </td>
-                                    </tr>
-                                    <?php else: foreach ($mainRequests as $r):
-                                        $cls     = badgeClass($r['status'], $r['cancelled_by'] ?? '');
-                                        $padId   = 'REQ-' . str_pad($r['id'], 4, '0', STR_PAD_LEFT);
-                                        $dateReq = date('m/d/Y', strtotime($r['date_requested']));
-                                        $canAct  = ($r['status'] === 'Pending');
-                                        $existId = !empty($r['id_photo'])    ? $r['id_photo']    : '';
-                                    ?>
-                                        <tr data-status="<?php echo htmlspecialchars($r['status']); ?>">
-                                            <td><strong><?php echo $padId; ?></strong></td>
-                                            <td><?php echo $studentName; ?></td>
-                                            <td><?php echo htmlspecialchars($r['document_type']); ?></td>
-                                            <td><?php echo $dateReq; ?></td>
-                                            <td><span class="badge <?php echo $cls; ?>"><?php echo $r['status']; ?></span></td>
-                                            <td>
-                                                <div class="action-group">
-                                                    <?php if ($canAct): ?>
-                                                        <button class="btn-edit"
-    data-req-id="<?php echo (int)$r['id']; ?>"
-    data-doc-type="<?php echo htmlspecialchars($r['document_type'], ENT_QUOTES); ?>"
-    data-purpose="<?php echo htmlspecialchars($r['purpose'], ENT_QUOTES); ?>"
-    data-sy="<?php echo htmlspecialchars($r['school_year_last_attended'] ?? '', ENT_QUOTES); ?>"
-    data-gl="<?php echo htmlspecialchars($r['grade_level'] ?? '', ENT_QUOTES); ?>"
-    data-id-photo="<?php echo htmlspecialchars($existId, ENT_QUOTES); ?>">
-    Edit
-</button>
-                                                        <form method="POST" style="display:inline;"
-                                                            onsubmit="return confirm('Cancel this request?');">
-                                                            <input type="hidden" name="cancel_request" value="1">
-                                                            <input type="hidden" name="req_id" value="<?php echo $r['id']; ?>">
-                                                            <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrfToken); ?>">
-                                                            <button type="submit" class="btn-cancel-req">Cancel</button>
-                                                        </form>
-                                                    <?php else: ?>
-                                                        <span class="btn-na">Edit</span>
-                                                        <span class="btn-na">Cancel</span>
-                                                    <?php endif; ?>
-                                                </div>
-                                            </td>
-                                        </tr>
-                                <?php endforeach;
-                                endif; ?>
-                            </tbody>
-                        </table>
+                        <tbody id="main-tbody">
+                            <?php if (empty($mainRequests)): ?>
+                                <tr>
+                                    <td colspan="5">
+                                        <div class="empty-state">
+                                            <div class="empty-icon"><?php echo icon('inbox', 30); ?></div>
+                                            <p>No active requests yet.<br>Click <strong>Request a Document</strong> to get started.</p>
+                                        </div>
+                                    </td>
+                                </tr>
+                            <?php else: foreach ($mainRequests as $r):
+                                $cls     = badgeClass($r['status'], $r['cancelled_by'] ?? '');
+                                $padId   = 'REQ-' . str_pad($r['id'], 4, '0', STR_PAD_LEFT);
+                                $dateReq = date('m/d/Y', strtotime($r['date_requested']));
+                                $canAct  = ($r['status'] === 'Pending');
+                                // Review lock: once the registrar has opened this request's
+                                // details, the student can no longer EDIT it (cancel stays).
+                                $isLocked = $canAct && !empty($r['registrar_viewed_at']);
+                                $existId = !empty($r['id_photo']) ? $r['id_photo'] : '';
+                            ?>
+                                <tr data-status="<?php echo htmlspecialchars($r['status']); ?>">
+                                    <td><strong><?php echo $padId; ?></strong></td>
+                                    <td><?php echo htmlspecialchars($r['document_type']); ?></td>
+                                    <td><?php echo $dateReq; ?></td>
+                                    <td><span class="badge <?php echo $cls; ?>"><?php echo $r['status']; ?></span></td>
+                                    <td>
+                                        <div class="action-group">
+                                            <?php if ($isLocked): ?>
+                                                <span class="btn-na" title="Locked — the Registrar has already reviewed this request, so it can no longer be edited."><?php echo icon('lock', 12); ?> Edit</span>
+                                                <form method="POST" style="display:inline;"
+                                                    onsubmit="return confirm('Cancel this request?');">
+                                                    <input type="hidden" name="cancel_request" value="1">
+                                                    <input type="hidden" name="req_id" value="<?php echo $r['id']; ?>">
+                                                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrfToken); ?>">
+                                                    <button type="submit" class="btn-cancel-req">Cancel</button>
+                                                </form>
+                                            <?php elseif ($canAct): ?>
+                                                <button class="btn-edit"
+                                                    data-req-id="<?php echo (int)$r['id']; ?>"
+                                                    data-doc-type="<?php echo htmlspecialchars($r['document_type'], ENT_QUOTES); ?>"
+                                                    data-purpose="<?php echo htmlspecialchars($r['purpose'], ENT_QUOTES); ?>"
+                                                    data-sy="<?php echo htmlspecialchars($r['school_year_last_attended'] ?? '', ENT_QUOTES); ?>"
+                                                    data-gl="<?php echo htmlspecialchars($r['grade_level'] ?? '', ENT_QUOTES); ?>"
+                                                    data-id-photo="<?php echo htmlspecialchars($existId, ENT_QUOTES); ?>">
+                                                    Edit
+                                                </button>
+                                                <form method="POST" style="display:inline;"
+                                                    onsubmit="return confirm('Cancel this request?');">
+                                                    <input type="hidden" name="cancel_request" value="1">
+                                                    <input type="hidden" name="req_id" value="<?php echo $r['id']; ?>">
+                                                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrfToken); ?>">
+                                                    <button type="submit" class="btn-cancel-req">Cancel</button>
+                                                </form>
+                                            <?php else: ?>
+                                                <span class="btn-na">Edit</span>
+                                                <span class="btn-na">Cancel</span>
+                                            <?php endif; ?>
+                                        </div>
+                                    </td>
+                                </tr>
+                            <?php endforeach; endif; ?>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Request history -->
+            <div class="container" id="tbl-archived" style="display:<?php echo $activeTab === 'archived' ? '' : 'none'; ?>;">
+                <div class="table-header">
+                    <h3>History</h3>
+                    <div class="search-wrapper">
+                        <span class="search-icon"><?php echo icon('search', 13); ?></span>
+                        <input type="text" class="search" placeholder="Search…"
+                            oninput="filterRows('archived-tbody', this.value)">
                     </div>
                 </div>
-
-                <!-- Requests History -->
-                <div class="container" id="tbl-archived" style="display:<?php echo $activeTab === 'archived' ? '' : 'none'; ?>;">
-                    <div class="table-header">
-                        <h3>Requests History</h3>
-                        <div class="search-wrapper">
-                            <span class="search-icon">🔍</span>
-                            <input type="text" class="search" placeholder="Search archived..."
-                                oninput="filterRows('archived-tbody', this.value)">
-                        </div>
-                    </div>
-                    <!-- Status filter chips -->
-                    <div class="filter-chips" id="chips-archived">
-                        <button type="button" class="chip active" data-filter="">All</button>
-                        <button type="button" class="chip" data-filter="Released">✔ Released</button>
-                        <button type="button" class="chip" data-filter="Rejected">🚫 Rejected</button>
-                        <button type="button" class="chip" data-filter="Cancelled">✖ Cancelled</button>
-                    </div>
-                    <div class="tbl-scroll-wrap">
-                        <table class="tbl-x" style="min-width: 950px;">
+                <div class="filter-chips" id="chips-archived">
+                    <button type="button" class="chip active" data-filter="">All</button>
+                    <button type="button" class="chip" data-filter="Released"><?php echo icon('check-circle', 13); ?> Released</button>
+                    <button type="button" class="chip" data-filter="Rejected"><?php echo icon('ban', 13); ?> Rejected</button>
+                    <button type="button" class="chip" data-filter="Cancelled"><?php echo icon('x-circle', 13); ?> Cancelled</button>
+                </div>
+                <div class="tbl-scroll-wrap">
+                    <table class="tbl-x" style="min-width: 900px;">
                         <thead>
                             <tr>
                                 <th>Req ID</th>
@@ -1044,661 +1124,443 @@ $avatarInitials = strtoupper(substr($student['first_name'], 0, 1) . substr($stud
                                 <th>Actions</th>
                             </tr>
                         </thead>
-                            <tbody id="archived-tbody">
-                                <?php if (empty($archivedRequests)): ?>
-                                    <tr>
-                                        <td colspan="6">
-                                            <div class="empty-state">
-                                                <div class="empty-icon">📁</div>
-                                                <p>No archived requests yet.</p>
-                                            </div>
-                                        </td>
-                                    </tr>
-                                    <?php else: foreach ($archivedRequests as $r):
-                                        $cancelledBy = trim($r['cancelled_by'] ?? '');
-                                        $cls         = badgeClass($r['status'], $cancelledBy);
-                                        $padId       = 'REQ-' . str_pad($r['id'], 4, '0', STR_PAD_LEFT);
-                                        $dateReq     = date('m/d/Y', strtotime($r['date_requested']));
-                                        $dateRel     = !empty($r['date_released']) ? date('m/d/Y', strtotime($r['date_released'])) : null;
+                        <tbody id="archived-tbody">
+                            <?php if (empty($archivedRequests)): ?>
+                                <tr>
+                                    <td colspan="6">
+                                        <div class="empty-state">
+                                            <div class="empty-icon"><?php echo icon('folder', 30); ?></div>
+                                            <p>No history yet. Released and closed requests appear here.</p>
+                                        </div>
+                                    </td>
+                                </tr>
+                            <?php else: foreach ($archivedRequests as $r):
+                                $cancelledBy = trim($r['cancelled_by'] ?? '');
+                                $cls         = badgeClass($r['status'], $cancelledBy);
+                                $padId       = 'REQ-' . str_pad($r['id'], 4, '0', STR_PAD_LEFT);
+                                $dateReq     = date('m/d/Y', strtotime($r['date_requested']));
+                                $dateRel     = !empty($r['date_released']) ? date('m/d/Y', strtotime($r['date_released'])) : null;
 
-                                        // Determine the exact cancellation type
-                                        $byRegistrar = ($r['status'] === 'Cancelled' && $cancelledBy === 'registrar');
-                                        $byStudent   = ($r['status'] === 'Cancelled' && ($cancelledBy === 'student' || $cancelledBy === ''));
+                                $byRegistrar = ($r['status'] === 'Cancelled' && $cancelledBy === 'registrar');
+                                $byStudent   = ($r['status'] === 'Cancelled' && ($cancelledBy === 'student' || $cancelledBy === ''));
+                                $canRestore  = $byStudent;
 
-                                        // Only student-cancelled requests can be restored
-                                        $canRestore  = $byStudent;
-
-                                        // Label to display in the Status column
-                                        $statusLabel = $r['status'];
-                                        if ($byRegistrar) $statusLabel = 'Rejected';
-                                        if ($byStudent)   $statusLabel = 'Cancelled';
-                                    ?>
-                                        <tr data-status="<?php echo htmlspecialchars($statusLabel); ?>"<?php echo $r['status'] === 'Cancelled' ? ' data-cancelled="1"' : ''; ?>>
-                                            <td><strong><?php echo $padId; ?></strong></td>
-                                            <td><?php echo htmlspecialchars($r['document_type']); ?></td>
-                                            <td><?php echo $dateReq; ?></td>
-                                            <td><?php echo $dateRel ? $dateRel : '<span class="date-na">—</span>'; ?></td>
-                                            <td>
-                                                <span class="badge <?php echo $cls; ?>"><?php echo $statusLabel; ?></span>
-                                                <?php if ($byRegistrar): ?>
-                                                    <span class="badge-rejected">Rejected by Registrar</span>
-                                                    <?php if (!empty($r['rejection_reason'])): ?>
-                                                        <div class="reject-reason" title="Registrar's reason">💬 <?php echo htmlspecialchars($r['rejection_reason']); ?></div>
-                                                    <?php endif; ?>
-                                                <?php endif; ?>
-                                            </td>
-                                            <td>
-                                                <?php if (!empty($r['e_certificate'])): ?>
-                                                    <a class="btn-dl-cert" href="../phpLogics/downloadCert.php?req_id=<?php echo (int)$r['id']; ?>">🎓 e-Certificate</a>
-                                                <?php endif; ?>
-                                                <?php if ($canRestore): ?>
-                                                    <form method="POST" action="../phpLogics/restoreReq.php" style="display:inline;"
-                                                        onsubmit="return confirm('Restore this request to active?');">
-                                                        <input type="hidden" name="restore_request" value="1">
-                                                        <input type="hidden" name="req_id" value="<?php echo $r['id']; ?>">
-                                                        <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrfToken); ?>">
-                                                        <button type="submit" class="btn-restore">↩ Restore</button>
-                                                    </form>
-                                                <?php elseif ($byRegistrar): ?>
-                                                    <span class="btn-rejected">🚫 Rejected</span>
-                                                <?php else: ?>
-                                                    <span class="btn-closed">✔ Closed</span>
-                                                <?php endif; ?>
-                                            </td>
-                                        </tr>
-                                <?php endforeach;
-                                endif; ?>
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            </div><!-- /view-requests -->
-
-
-
-
-<!-- ════ VIEW 3: Request Document ════ -->
-
-
-    <!-- Page Banner -->
-   
-
- <div id="view-request" style="display:<?php echo $activeView === 'request' ? 'block' : 'none'; ?>;">
-    <div class="page-banner">
-        <div class="page-banner-icon">📝</div>
-        <div class="page-banner-content">
-            <h1>Request <span>Document</span></h1>
-            <p>Submit a request for school credentials.</p>
-        </div>
-    </div>
-
-    <?php if ($errorMsg): ?>
-        <div class="alert alert-danger">⚠️ <?php echo htmlspecialchars($errorMsg); ?></div>
-    <?php endif; ?>
-
-  <form method="POST" enctype="multipart/form-data" id="request-form">
-        <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrfToken); ?>">
-        <input type="hidden" name="document_type" id="selected-document-input" value="">
-        <input type="hidden" name="submit_request" value="1">
-
-        <!-- ===== STEP 1: DOCUMENT CHOICE ===== -->
-        <div id="step-document">
-            <div class="document-card">
-                <h2 class="card-title">What document do you need?</h2>
-              
-     <div class="card-note">
-    <p>
-        <strong>📌 Note:</strong><br>
-        <ul class="note-list">
-            <li>Only the documents listed below can be requested online.</li>
-            <li>You may have a maximum of 3 pending requests at a time.</li>
-            <li>Once you request a document, it is locked (even after release) — you cannot request it again until that request is cancelled.</li>
-            <li>Documents you already requested are highlighted with their current status and cannot be selected.</li>
-        </ul>
-    </p>
-
-    <hr>
-
-
-</div>
-
-          <div class="document-grid">
-    <?php foreach ($documentTypes as $dt):
-        $takenStatus = $activeDocTypes[$dt] ?? null; ?>
-        <?php if ($takenStatus): ?>
-            <button type="button" class="doc-btn doc-btn-taken" disabled
-                title="You already have a <?= htmlspecialchars($takenStatus) ?> request for this document.">
-                <span class="doc-btn-label">📄 <?= htmlspecialchars($dt) ?></span>
-                <span class="doc-taken-badge">✔ <?= htmlspecialchars($takenStatus) ?></span>
-            </button>
-        <?php else: ?>
-            <button type="button" class="doc-btn"
-                onclick="selectDocument('<?= htmlspecialchars($dt, ENT_QUOTES) ?>')">
-                <span class="doc-btn-label">📄 <?= htmlspecialchars($dt) ?></span>
-            </button>
-        <?php endif; ?>
-    <?php endforeach; ?>
-</div>
-<br>
-
-
-            </div>
-        </div>
-
-
-
-        <!-- ===== STEP 2: REQUEST FORM ===== -->
-        <div id="step-form" style="display:none;">
-            <div class="account-card">
-
-                <div class="selected-doc-banner" id="selected-doc-banner">
-                    <span>Requesting: <strong id="selected-doc-label"></strong></span>
-                    <button type="button" class="btn-restore" onclick="backToStep1()">Change document</button>
-                </div>
-
-                <div class="acct-form-grid" style="margin-top:18px;">
-                    <div class="acct-form-group">
-                        <label>Student Name</label>
-                        <input type="text" value="<?php echo $studentName; ?>" readonly class="input-readonly">
-                    </div>
-                    <div class="acct-form-group">
-                        <label>Student ID</label>
-                        <input type="text" value="<?php echo htmlspecialchars($student['student_id']); ?>" readonly class="input-readonly">
-                    </div>
-                    <div class="acct-form-group full" id="gl-field-wrap" style="display:none;">
-                        <label>Grade Level <span class="req-star">*</span>
-                            <span class="upload-hint">Required for this document</span>
-                        </label>
-                        <input type="text" name="grade_level" id="gl-input" placeholder="e.g. Grade 12" maxlength="20">
-                    </div>
-                    <div class="acct-form-group full" id="sy-field-wrap" style="display:none;">
-                        <label>School Year Last Attended <span class="req-star">*</span>
-                            <span class="upload-hint">Required for this document — e.g. 2024–2025</span>
-                        </label>
-                        <input type="text" name="school_year_last_attended" id="sy-input"
-                            placeholder="e.g. 2024-2025" maxlength="20">
-                    </div>
-                    <div class="acct-form-group full">
-                        <label>Purpose / Reason <span class="req-star">*</span></label>
-                        <input type="text" name="purpose" id="purpose-input" placeholder="e.g. College application">
-                    </div>
-
-                    <div class="acct-form-group full">
-                        <label>Supporting Documents
-                            <span class="upload-hint">JPG, PNG, GIF, WEBP or PDF · max 5 MB</span>
-                        </label>
-                        <div class="req-uploads-grid">
-                            <div class="req-upload-card" id="new-card-id"
-                                ondragover="cardDragOver(event,'new-card-id')"
-                                ondragleave="cardDragLeave('new-card-id')"
-                                ondrop="cardDrop(event,'new-card-id','new-id-input','new-id-name','new-id-preview')">
-                                <input type="file" name="id_photo" id="new-id-input"
-                                    accept="image/jpeg,image/png,image/gif,image/webp,application/pdf"
-                                    onchange="cardFileSelected(this,'new-card-id','new-id-name','new-id-preview')">
-                                <button type="button" class="ruc-remove-btn"
-                                    onclick="cardRemoveFile(event,'new-card-id','new-id-input','new-id-name','new-id-preview')">✕</button>
-                                <span class="ruc-check">✅</span>
-                                <span class="ruc-icon">🪪</span>
-                                <span class="ruc-title">Valid ID</span>
-                                <span class="ruc-required">Required</span>
-                                <p class="ruc-hint">School ID, Government ID,<br>or any valid photo ID</p>
-                                <div class="ruc-preview" id="new-id-preview"></div>
-                                <div class="ruc-filename" id="new-id-name"></div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <button type="button" class="save-btn" onclick="submitRequest()">✅ Submit Request</button>
-            </div>
-        </div>
-
-    </form>
-</div>
-
-
-
-
-
-
-
-       <!-- ════ VIEW 3: ACCOUNT ════ -->
-<div id="view-account" style="display:<?php echo $activeView === 'account' ? 'block' : 'none'; ?>;">
-
-    <div class="page-banner">
-        <div class="page-banner-icon">📝</div>
-        <div class="page-banner-content">
-            <h1>Account <span>Information</span></h1>
-            <p>View and update your contact details.</p>
-        </div>
-    </div>
-
-    <?php if ($updateSuccess): ?>
-        <div class="alert alert-success">✔ <?php echo htmlspecialchars($updateSuccess); ?></div>
-    <?php endif; ?>
-    <?php if ($updateError): ?>
-        <div class="alert alert-danger">⚠️ <?php echo htmlspecialchars($updateError); ?></div>
-    <?php endif; ?>
-
-    <div class="account-card">
-        <form method="POST" enctype="multipart/form-data" id="account-form">
-            <input type="hidden" name="update_account" value="1">
-            <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrfToken); ?>">
-
-            <!-- ═══════════════════ 👤 PROFILE ═══════════════════ -->
-            <div class="form-section-label">👤 Profile</div>
-
-            <div class="avatar-section">
-                <div class="avatar-ring">
-                    <div class="account-avatar" id="avatar-display">
-                        <?php if ($profilePhoto): ?>
-                            <img src="<?php echo htmlspecialchars($profilePhotoUrl); ?>" alt="Profile photo"
-                                onerror="this.remove(); document.getElementById('avatar-fallback-initials').style.display='flex';">
-                            <span id="avatar-fallback-initials" style="display:none;"><?php echo $avatarInitials; ?></span>
-                        <?php else: ?>
-                            <span id="avatar-fallback-initials"><?php echo $avatarInitials; ?></span>
-                        <?php endif; ?>
-                    </div>
-                    <label for="profile-photo-input" class="avatar-edit-label" title="Change photo">✏️</label>
-                </div>
-                <input type="file" name="profile_photo" id="profile-photo-input"
-                    accept="image/jpeg,image/png,image/gif,image/webp"
-                    onchange="previewAvatar(this)">
-                <p class="avatar-hint">Click ✏️ to change photo (JPG/PNG/GIF/WEBP · max 3 MB)</p>
-                <div class="avatar-new-preview" id="avatar-new-preview">
-                    <img id="avatar-new-thumb" src="" alt="New photo preview">
-                    <span id="avatar-new-name"></span>
-                    <button type="button" class="remove-photo" onclick="clearAvatar()">✕ Remove</button>
+                                $statusLabel = $r['status'];
+                                if ($byRegistrar) $statusLabel = 'Rejected';
+                                if ($byStudent)   $statusLabel = 'Cancelled';
+                            ?>
+                                <tr data-status="<?php echo htmlspecialchars($statusLabel); ?>"<?php echo $r['status'] === 'Cancelled' ? ' data-cancelled="1"' : ''; ?>>
+                                    <td><strong><?php echo $padId; ?></strong></td>
+                                    <td><?php echo htmlspecialchars($r['document_type']); ?></td>
+                                    <td><?php echo $dateReq; ?></td>
+                                    <td><?php echo $dateRel ? $dateRel : '<span class="date-na">—</span>'; ?></td>
+                                    <td>
+                                        <span class="badge <?php echo $cls; ?>"><?php echo $statusLabel; ?></span>
+                                        <?php if ($byRegistrar): ?>
+                                            <?php if (!empty($r['rejection_reason'])): ?>
+                                                <div class="reject-reason" title="Registrar's reason"><?php echo icon('message', 13); ?> <?php echo htmlspecialchars($r['rejection_reason']); ?></div>
+                                            <?php endif; ?>
+                                        <?php endif; ?>
+                                    </td>
+                                    <td>
+                                        <div class="action-group">
+                                            <?php if (!empty($r['e_certificate'])): ?>
+                                                <a class="btn-dl-cert" href="../phpLogics/downloadCert.php?req_id=<?php echo (int)$r['id']; ?>"><?php echo icon('award', 14); ?> e-Certificate</a>
+                                            <?php endif; ?>
+                                            <?php if ($canRestore): ?>
+                                                <form method="POST" action="../phpLogics/restoreReq.php" style="display:inline;"
+                                                    onsubmit="return confirm('Restore this request to active?');">
+                                                    <input type="hidden" name="restore_request" value="1">
+                                                    <input type="hidden" name="req_id" value="<?php echo $r['id']; ?>">
+                                                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrfToken); ?>">
+                                                    <button type="submit" class="btn-restore"><?php echo icon('restore', 13); ?> Restore</button>
+                                                </form>
+                                            <?php elseif ($byRegistrar): ?>
+                                                <span class="btn-rejected"><?php echo icon('ban', 13); ?> Rejected</span>
+                                            <?php else: ?>
+                                                <span class="btn-closed"><?php echo icon('check', 13); ?> Closed</span>
+                                            <?php endif; ?>
+                                        </div>
+                                    </td>
+                                </tr>
+                            <?php endforeach; endif; ?>
+                        </tbody>
+                    </table>
                 </div>
             </div>
+        </div><!-- /view-requests -->
 
-           <div class="acct-form-grid">
-    <div class="acct-form-group full">
-        <label>Name <span class="account-role-badge-inline">Student</span></label>
-        <input type="text" name="student_name" id="student-name-input" maxlength="201"
-            value="<?php echo htmlspecialchars($studentName); ?>">
-        <span class="upload-hint">Edits here automatically fill First Name / Last Name below</span>
-    </div>
-</div>
-             <div class="acct-form-group acct-form-group--locked">
-    <label>Student ID Number 🔒 <span class="locked-hint">read-only</span></label>
-    <input
-        type="text"
-        value="<?php echo htmlspecialchars($student['student_id'] ?? ''); ?>"
-        readonly
-        class="readonly-field locked-field"
-        title="Your Student ID is system-assigned and cannot be changed">
-</div>                 
-            <div class="account-divider"></div>
-
-            <!-- ═══════════════════ ACADEMIC INFORMATION ═══════════════════ -->
-            <div class="form-section-label">Academic Information</div>
-            <div class="acct-form-grid">
-
-                <div class="acct-form-group">
-                    <label>LRN (Learner Reference Number)</label>
-                    <input type="text" name="lrn" inputmode="numeric" maxlength="12"
-                        value="<?php echo htmlspecialchars($student['lrn'] ?? ''); ?>"
-                        placeholder="12-digit LRN">
-                </div>
-
-                <div class="acct-form-group">
-                    <label>First Name</label>
-                    <input type="text" name="first_name" maxlength="100"
-                        value="<?php echo htmlspecialchars($student['first_name'] ?? ''); ?>" required>
-                </div>
-
-                <div class="acct-form-group">
-                    <label>Last Name</label>
-                    <input type="text" name="last_name" maxlength="100"
-                        value="<?php echo htmlspecialchars($student['last_name'] ?? ''); ?>" required>
-                </div>
-
+        <!-- ══════ VIEW: REQUEST A DOCUMENT ══════ -->
+        <div id="view-request" style="display:<?php echo $activeView === 'request' ? 'block' : 'none'; ?>;">
+            <div class="view-head">
+                <h1>Request a <span>Document</span></h1>
+                <p>Two quick steps: pick your document, then fill in the details.</p>
             </div>
 
-            <!-- ═══════════════════ CONTACT INFORMATION ═══════════════════ -->
-            <div class="account-divider"></div>
-            <div class="form-section-label">Contact Information</div>
-            <div class="acct-form-grid">
-                <div class="acct-form-group full">
-                    <label>Email <span class="req-star">*</span></label>
-                    <input type="email" name="email"
-                        value="<?php echo htmlspecialchars($student['email'] ?? ''); ?>" required>
-                </div>
-                <div class="acct-form-group full">
-                    <label>Phone Number</label>
-                    <input type="text" name="contact" inputmode="numeric"
-                        pattern="[0-9]{7,11}" title="7–11 digits, numbers only"
-                        value="<?php echo htmlspecialchars($student['contact'] ?? ''); ?>"
-                        placeholder="e.g. 09171234567" maxlength="11">
-                </div>
+            <?php if ($errorMsg): ?>
+                <div class="alert alert-danger"><?php echo icon('alert', 15); ?> <?php echo htmlspecialchars($errorMsg); ?></div>
+            <?php endif; ?>
+
+            <!-- Step indicator -->
+            <div class="step-indicator">
+                <span class="step-dot active" id="stepdot-1"><span class="num">1</span> Choose document</span>
+                <span class="step-line"></span>
+                <span class="step-dot" id="stepdot-2"><span class="num">2</span> Fill in details</span>
             </div>
 
-            <!-- ═══════════════════ 🔒 CHANGE PASSWORD (optional) ═══════════════════ -->
-            <div class="account-divider"></div>
-            <div class="form-section-label">🔒 Change Password <span class="hint-inline">(leave blank to keep your current password)</span></div>
-            <div class="acct-form-grid">
-                <div class="acct-form-group">
-                    <label>Current Password</label>
-                    <input type="password" name="current_password" autocomplete="current-password">
-                </div>
-                <div class="acct-form-group">
-                    <label>New Password <span class="hint-inline">(min. 5 characters)</span></label>
-                    <input type="password" name="new_password" autocomplete="new-password">
-                </div>
-            </div>
+            <form method="POST" enctype="multipart/form-data" id="request-form">
+                <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrfToken); ?>">
+                <input type="hidden" name="document_type" id="selected-document-input" value="">
+                <input type="hidden" name="submit_request" value="1">
 
-            <button type="submit" class="save-btn">💾 Save Changes</button>
-        </form>
-    </div>
-</div><!-- /view-account -->
+                <!-- STEP 1: choose the document -->
+                <div id="step-document">
+                    <div class="card">
+                        <h2 class="card-title">What document do you need?</h2>
+                        <ul class="note-list">
+                            <li>Only the documents listed below can be requested online.</li>
+                            <li>You may have up to <strong>3 pending requests</strong> at a time.</li>
+                            <li>Documents you already requested are <strong>locked</strong> until that request is cancelled — they show their current status.</li>
+                        </ul>
 
-<!-- ════ VIEW 5: NOTIFICATIONS ════ -->
-<div id="view-notifications" style="display:<?php echo $activeView === 'notifications' ? 'block' : 'none'; ?>;">
-
-    <div class="page-banner">
-        <div class="page-banner-icon">🔔</div>
-        <div class="page-banner-content">
-            <h1>Notifications <span>& Updates</span></h1>
-            <p>Stay updated on new school announcements and the real-time status of your credential requests.</p>
-        </div>
-    </div>
-
-    <!-- Notification Toolbar: Category Filters & Actions -->
-    <div class="notif-toolbar">
-        <div class="notif-filter-pills">
-            <button type="button" class="notif-pill active" onclick="filterNotifs('all', this)">
-                All Updates <span class="notif-pill-count" id="count-all"><?php echo count($notifications); ?></span>
-            </button>
-            <button type="button" class="notif-pill" onclick="filterNotifs('announcement', this)">
-                📢 Announcements <span class="notif-pill-count" id="count-ann"><?php echo count(array_filter($notifications, fn($n) => $n['type'] === 'announcement')); ?></span>
-            </button>
-            <button type="button" class="notif-pill" onclick="filterNotifs('request', this)">
-                📋 Request Status <span class="notif-pill-count" id="count-req"><?php echo count(array_filter($notifications, fn($n) => $n['type'] === 'request')); ?></span>
-            </button>
-        </div>
-
-        <div class="notif-toolbar-actions">
-            <button type="button" class="btn-mark-all-read" onclick="markAllNotifsAsRead()">
-                ✓ Mark all as read
-            </button>
-        </div>
-    </div>
-
-    <!-- Notifications List -->
-    <div class="notif-list-container">
-        <?php if (empty($notifications)): ?>
-            <div class="notif-empty-state">
-                <div class="notif-empty-icon">🔔</div>
-                <h3>No Notifications Yet</h3>
-                <p>When the school administration publishes announcements or your request status changes, you'll see them listed here.</p>
-                <button type="button" class="btn-go-dash" onclick="showView('dashboard')">Back to Dashboard</button>
-            </div>
-        <?php else: ?>
-            <div class="notif-cards-grid" id="notifCardsGrid">
-                <?php foreach ($notifications as $n): ?>
-                    <div class="notif-card notif-type-<?php echo htmlspecialchars($n['type']); ?>"
-                         data-type="<?php echo htmlspecialchars($n['type']); ?>"
-                         data-id="<?php echo htmlspecialchars($n['id']); ?>"
-                         data-time="<?php echo (int)$n['time']; ?>">
-
-                        <div class="notif-card-icon-wrap <?php echo htmlspecialchars($n['badge_cls']); ?>">
-                            <span class="notif-card-icon"><?php echo $n['icon']; ?></span>
-                        </div>
-
-                        <div class="notif-card-body">
-                            <div class="notif-card-header">
-                                <div class="notif-card-tags">
-                                    <span class="notif-badge <?php echo htmlspecialchars($n['badge_cls']); ?>">
-                                        <?php echo htmlspecialchars($n['badge']); ?>
-                                    </span>
-                                    <?php if ($n['type'] === 'announcement'): ?>
-                                        <span class="notif-source-tag">School Announcement</span>
-                                    <?php else: ?>
-                                        <span class="notif-source-tag">Credential Request</span>
-                                    <?php endif; ?>
-                                </div>
-                                <span class="notif-time" title="<?php echo htmlspecialchars($n['date_str']); ?>">
-                                    🕒 <?php echo htmlspecialchars($n['date_str']); ?>
-                                </span>
-                            </div>
-
-                            <h3 class="notif-card-title"><?php echo htmlspecialchars($n['title']); ?></h3>
-
-                            <div class="notif-card-text">
-                                <?php echo nl2br(htmlspecialchars($n['body'])); ?>
-                            </div>
-
-                            <?php if (!empty($n['rejection_reason'])): ?>
-                                <div class="notif-rejection-callout">
-                                    <strong>Registrar's Note:</strong> <?php echo htmlspecialchars($n['rejection_reason']); ?>
-                                </div>
-                            <?php endif; ?>
-
-                            <div class="notif-card-actions">
-                                <?php if ($n['type'] === 'announcement'): ?>
-                                    <button type="button" class="notif-action-btn primary" onclick="showView('dashboard')">
-                                        View Dashboard Bulletin ➔
+                        <div class="document-grid">
+                            <?php foreach ($documentTypes as $dt):
+                                $takenStatus = $activeDocTypes[$dt] ?? null; ?>
+                                <?php if ($takenStatus): ?>
+                                    <button type="button" class="doc-btn doc-btn-taken" disabled
+                                        title="You already have a <?= htmlspecialchars($takenStatus) ?> request for this document.">
+                                        <span class="doc-btn-label"><?php echo icon('file-text', 17); ?> <?= htmlspecialchars($dt) ?></span>
+                                        <span class="doc-taken-badge"><span style="display:inline-flex;align-items:center;gap:2px;"><?php echo icon('check', 10); ?> <?= htmlspecialchars($takenStatus) ?></span></span>
                                     </button>
-                                <?php elseif ($n['type'] === 'request'): ?>
-                                    <?php if (!empty($n['e_cert'])): ?>
-                                        <a href="../phpLogics/downloadCert.php?req_id=<?php echo (int)$n['req_id']; ?>" class="notif-action-btn success">
-                                            🎓 Download e-Certificate
-                                        </a>
-                                    <?php endif; ?>
-                                    <button type="button" class="notif-action-btn secondary" onclick="showView('requests')">
-                                        Track in My Requests ➔
+                                <?php else: ?>
+                                    <button type="button" class="doc-btn"
+                                        onclick="selectDocument('<?= htmlspecialchars($dt, ENT_QUOTES) ?>')">
+                                        <span class="doc-btn-label"><?php echo icon('file-text', 17); ?> <?= htmlspecialchars($dt) ?></span>
                                     </button>
                                 <?php endif; ?>
+                            <?php endforeach; ?>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- STEP 2: details -->
+                <div id="step-form" style="display:none;">
+                    <div class="card">
+                        <div class="selected-doc-banner" id="selected-doc-banner">
+                            <span>Requesting: <strong id="selected-doc-label"></strong></span>
+                            <button type="button" class="btn-restore" onclick="backToStep1()"><?php echo icon('arrow-left', 14); ?> Change document</button>
+                        </div>
+
+                        <div class="acct-form-grid">
+                            <div class="acct-form-group">
+                                <label>Student Name</label>
+                                <input type="text" value="<?php echo $studentName; ?>" readonly class="input-readonly">
+                            </div>
+                            <div class="acct-form-group">
+                                <label>Student ID</label>
+                                <input type="text" value="<?php echo htmlspecialchars($student['student_id']); ?>" readonly class="input-readonly">
+                            </div>
+                            <div class="acct-form-group full" id="gl-field-wrap" style="display:none;">
+                                <label>Grade Level <span class="req-star">*</span>
+                                    <span class="upload-hint">required for this document</span>
+                                </label>
+                                <select name="grade_level" id="gl-input">
+                                    <?php echo render_select_options($gradeOptions, $presetGrade, 'Select grade level…'); ?>
+                                </select>
+                                <span class="upload-hint">Saved to My Account automatically when you submit</span>
+                            </div>
+                            <div class="acct-form-group full" id="sy-field-wrap" style="display:none;">
+                                <label>School Year Last Attended <span class="req-star">*</span></label>
+                                <select name="school_year_last_attended" id="sy-input">
+                                    <?php echo render_select_options($syOptions, $presetSy, 'Select school year…'); ?>
+                                </select>
+                                <span class="upload-hint">Saved to My Account automatically when you submit</span>
+                            </div>
+                            <div class="acct-form-group full">
+                                <label>Purpose / Reason <span class="req-star">*</span></label>
+                                <select name="purpose" id="purpose-input" onchange="toggleOtherPurpose()">
+                                    <option value="">Select a purpose…</option>
+                                    <?php foreach ($purposeOptions as $pOpt): ?>
+                                        <option value="<?php echo htmlspecialchars($pOpt, ENT_QUOTES); ?>"><?php echo htmlspecialchars($pOpt); ?></option>
+                                    <?php endforeach; ?>
+                                    <option value="Other">Other — please specify</option>
+                                </select>
+                                <input type="text" name="purpose_other" id="purpose-other-input" maxlength="255"
+                                    placeholder="Please specify your purpose" style="display:none; margin-top:8px;">
+                            </div>
+
+                            <div class="acct-form-group full">
+                                <label>Valid ID
+                                    <span class="upload-hint">JPG, PNG, GIF, WEBP or PDF · max 5 MB</span>
+                                </label>
+                                <div class="req-uploads-grid">
+                                    <div class="req-upload-card" id="new-card-id"
+                                        ondragover="cardDragOver(event,'new-card-id')"
+                                        ondragleave="cardDragLeave('new-card-id')"
+                                        ondrop="cardDrop(event,'new-card-id','new-id-input','new-id-name','new-id-preview')">
+                                        <input type="file" name="id_photo" id="new-id-input"
+                                            accept="image/jpeg,image/png,image/gif,image/webp,application/pdf"
+                                            onchange="cardFileSelected(this,'new-card-id','new-id-name','new-id-preview')">
+                                        <button type="button" class="ruc-remove-btn"
+                                            onclick="cardRemoveFile(event,'new-card-id','new-id-input','new-id-name','new-id-preview')"><?php echo icon('x', 11); ?></button>
+                                        <span class="ruc-check"><?php echo icon('check', 12); ?></span>
+                                        <span class="ruc-icon"><?php echo icon('id-card', 26); ?></span>
+                                        <span class="ruc-title">Valid ID</span>
+                                        <span class="ruc-required">Required</span>
+                                        <p class="ruc-hint">School ID, government ID,<br>or any photo ID</p>
+                                        <div class="ruc-preview" id="new-id-preview"></div>
+                                        <div class="ruc-filename" id="new-id-name"></div>
+                                    </div>
+                                </div>
                             </div>
                         </div>
 
+                        <button type="button" class="save-btn" onclick="submitRequest()"><?php echo icon('check-circle', 16); ?> Submit Request</button>
                     </div>
-                <?php endforeach; ?>
+                </div>
+            </form>
+        </div><!-- /view-request -->
+
+        <!-- ══════ VIEW: MY ACCOUNT ══════ -->
+        <div id="view-account" style="display:<?php echo $activeView === 'account' ? 'block' : 'none'; ?>;">
+            <div class="view-head">
+                <h1>My <span>Account</span></h1>
+                <p>Keep your contact details up to date so the registrar can reach you.</p>
             </div>
-        <?php endif; ?>
-    </div>
 
-</div><!-- /view-notifications -->
+            <?php if ($updateSuccess): ?>
+                <div class="alert alert-success"><?php echo icon('check-circle', 15); ?> <?php echo htmlspecialchars($updateSuccess); ?></div>
+            <?php endif; ?>
+            <?php if ($updateError): ?>
+                <div class="alert alert-danger"><?php echo icon('alert', 15); ?> <?php echo htmlspecialchars($updateError); ?></div>
+            <?php endif; ?>
 
-<style>
-.verify-badge {
-    display: inline-block;
-    font-size: 0.75rem;
-    font-weight: 600;
-    padding: 2px 8px;
-    border-radius: 999px;
-    margin-top: 4px;
-}
-.verify-badge-verified {
-    background: #d1fae5;
-    color: #065f46;
-}
-.verify-badge-pending {
-    background: #fef3c7;
-    color: #92400e;
-}
-.verify-badge-none {
-    background: #f3f4f6;
-    color: #6b7280;
-}
+            <div class="card">
+                <form method="POST" enctype="multipart/form-data" id="account-form">
+                    <input type="hidden" name="update_account" value="1">
+                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrfToken); ?>">
 
-/* ── Make the Grade Level dropdown look like the text inputs beside it ── */
-.acct-form-group .acct-select {
-    -webkit-appearance: none;
-    -moz-appearance: none;
-    appearance: none;
-    width: 100%;
-    box-sizing: border-box;
-    font: inherit;
-    color: inherit;
-    background-color: #fff;
-    border: 1px solid #d1d5db;
-    border-radius: 8px;
-    padding: 10px 36px 10px 12px;
-    height: 44px;
-    line-height: 1.2;
-    cursor: pointer;
-    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='9' viewBox='0 0 14 9'><path d='M1 1l6 6 6-6' stroke='%23667085' stroke-width='2' fill='none' fill-rule='evenodd' stroke-linecap='round' stroke-linejoin='round'/></svg>");
-    background-repeat: no-repeat;
-    background-position: right 12px center;
-    transition: border-color .15s ease, box-shadow .15s ease;
-}
-.acct-form-group .acct-select:focus {
-    outline: none;
-    border-color: #6366f1;
-    box-shadow: 0 0 0 3px rgba(99,102,241,0.15);
-}
-.acct-form-group .acct-select:hover {
-    border-color: #9ca3af;
-}
+                    <!-- Profile photo -->
+                    <div class="avatar-section">
+                        <div class="avatar-ring">
+                            <div class="account-avatar" id="avatar-display">
+                                <?php if ($profilePhoto): ?>
+                                    <img src="<?php echo htmlspecialchars($profilePhotoUrl); ?>" alt="Profile photo"
+                                        onerror="this.remove(); document.getElementById('avatar-fallback-initials').style.display='flex';">
+                                    <span id="avatar-fallback-initials" style="display:none;"><?php echo $avatarInitials; ?></span>
+                                <?php else: ?>
+                                    <span id="avatar-fallback-initials"><?php echo $avatarInitials; ?></span>
+                                <?php endif; ?>
+                            </div>
+                            <label for="profile-photo-input" class="avatar-edit-label" title="Change photo"><?php echo icon('pencil', 13); ?></label>
+                        </div>
+                        <input type="file" name="profile_photo" id="profile-photo-input"
+                            accept="image/jpeg,image/png,image/gif,image/webp"
+                            onchange="previewAvatar(this)">
+                        <p class="avatar-hint">Click the pencil to change photo (JPG/PNG/GIF/WEBP · max 3 MB)</p>
+                        <div class="avatar-new-preview" id="avatar-new-preview">
+                            <img id="avatar-new-thumb" src="" alt="New photo preview">
+                            <span id="avatar-new-name"></span>
+                            <button type="button" class="remove-photo" onclick="clearAvatar()"><?php echo icon('x', 11); ?> Remove</button>
+                        </div>
+                    </div>
 
-/* ── Upload cards: hide the raw native file input (was showing "No file chosen") ── */
-.req-upload-card {
-    position: relative;
-    cursor: pointer;
-}
-.req-upload-card .ruc-file-input {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    opacity: 0;
-    overflow: hidden;
-    pointer-events: none;
-}
-.req-upload-card .ruc-remove-btn {
-    position: relative;
-    z-index: 2;
-}
+                    <!-- Identity — read-only, registrar-managed -->
+                    <div class="acct-form-grid">
+                        <div class="acct-form-group full">
+                            <label>Name <?php echo icon('lock', 13); ?> <span class="account-role-badge-inline">Student</span></label>
+                            <input type="text" id="name-display-input" value="<?php echo htmlspecialchars($studentName); ?>" readonly
+                                class="readonly-field locked-field"
+                                title="Updates automatically from First Name / Last Name below">
+                            <span class="upload-hint">Updates automatically as you edit First Name / Last Name below</span>
+                        </div>
+                        <div class="acct-form-group">
+                            <label>Student ID Number <?php echo icon('lock', 13); ?> <span class="locked-hint upload-hint">read-only</span></label>
+                            <input type="text"
+                                value="<?php echo htmlspecialchars($student['student_id'] ?? ''); ?>"
+                                readonly class="readonly-field locked-field"
+                                title="Your Student ID is system-assigned and cannot be changed">
+                        </div>
+                        <div class="acct-form-group">
+                            <label>LRN (Learner Reference Number) <?php echo icon('lock', 13); ?> <span class="locked-hint upload-hint">read-only</span></label>
+                            <input type="text"
+                                value="<?php echo htmlspecialchars(!empty($student['lrn']) ? $student['lrn'] : '—'); ?>"
+                                readonly class="readonly-field locked-field"
+                                title="Your LRN is part of your official record — ask the Registrar to correct it">
+                        </div>
+                        <div class="acct-form-group">
+                            <label>First Name <span class="req-star">*</span></label>
+                            <input type="text" name="first_name" maxlength="100"
+                                value="<?php echo htmlspecialchars($student['first_name'] ?? ''); ?>" required>
+                        </div>
+                        <div class="acct-form-group">
+                            <label>Last Name <span class="req-star">*</span></label>
+                            <input type="text" name="last_name" maxlength="100"
+                                value="<?php echo htmlspecialchars($student['last_name'] ?? ''); ?>" required>
+                        </div>
+                    </div>
 
-/* Two emoji (🪪 and ✅) aren't in every system font and were rendering as
-   empty boxes — swapping them for inline SVG so they always show up. */
-.ruc-svg-id, .ruc-svg-check {
-    display: inline-block;
-    width: 28px;
-    height: 28px;
-    background-repeat: no-repeat;
-    background-position: center;
-    background-size: contain;
-}
-.ruc-svg-id {
-    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%234b5563' stroke-width='1.6'><rect x='2.5' y='5' width='19' height='14' rx='2.5'/><circle cx='8' cy='12' r='2.2'/><line x1='13' y1='9.5' x2='18.5' y2='9.5'/><line x1='13' y1='12.5' x2='18.5' y2='12.5'/><line x1='5.5' y1='16' x2='10.5' y2='16'/></svg>");
-}
-.ruc-svg-check {
-    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2316a34a' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'><circle cx='12' cy='12' r='10' fill='%23dcfce7' stroke='none'/><path d='M7 12.5l3 3 7-7'/></svg>");
-}
+                    <div class="account-divider"></div>
+                    <div class="form-section-label">Academic Information</div>
+                    <div class="acct-form-grid">
+                        <div class="acct-form-group">
+                            <label>Grade Level</label>
+                            <input type="text" name="grade_level" maxlength="20"
+                                value="<?php echo htmlspecialchars(!empty($student['grade_level']) ? $student['grade_level'] : $displayGradeLevel); ?>"
+                                placeholder="e.g. Grade 12">
+                        </div>
+                        <div class="acct-form-group">
+                            <label>Last School Year Attended</label>
+                            <input type="text" name="school_year_last_attended" maxlength="20"
+                                value="<?php echo htmlspecialchars(!empty($student['school_year_last_attended']) ? $student['school_year_last_attended'] : $displaySchoolYear); ?>"
+                                placeholder="e.g. 2024-2025">
+                        </div>
+                    </div>
 
-/* ── Avatar: make sure the photo actually renders inside the circle ── */
-.account-avatar {
-    overflow: hidden;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: #eef0f4;
-}
-.account-avatar img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    display: block;
-}
-#avatar-fallback-initials {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 100%;
-    height: 100%;
-    font-weight: 600;
-}
-.avatar-new-preview {
-    display: none;
-    align-items: center;
-    gap: 8px;
-}
-.avatar-new-preview.visible {
-    display: flex;
-}
-#avatar-new-thumb {
-    width: 32px;
-    height: 32px;
-    border-radius: 50%;
-    object-fit: cover;
-    display: none;
-}
-#avatar-new-thumb.visible {
-    display: block;
-}
-</style>
+                    <div class="account-divider"></div>
+                    <div class="form-section-label">Contact Information</div>
+                    <div class="acct-form-grid">
+                        <div class="acct-form-group">
+                            <label>Email <span class="req-star">*</span></label>
+                            <input type="email" name="email"
+                                value="<?php echo htmlspecialchars($student['email'] ?? ''); ?>" required>
+                        </div>
+                        <div class="acct-form-group">
+                            <label>Phone Number</label>
+                            <input type="text" name="contact" inputmode="numeric"
+                                pattern="[0-9]{7,11}" title="7–11 digits, numbers only"
+                                value="<?php echo htmlspecialchars($student['contact'] ?? ''); ?>"
+                                placeholder="e.g. 09171234567" maxlength="11">
+                        </div>
+                    </div>
 
-<script>
-/* ── "Name" card ⇄ First/Last name live mirror ─────────────────
-   The combined Name card edits flow into the First Name / Last Name
-   fields (first word = first name, the rest = last name), and edits
-   below rebuild the combined card — so BOTH inputs actually save. */
-(function () {
-    var form     = document.getElementById('account-form');
-    var nameInp  = document.getElementById('student-name-input');
-    var firstInp = form ? form.querySelector('input[name="first_name"]') : null;
-    var lastInp  = form ? form.querySelector('input[name="last_name"]') : null;
-    if (!nameInp || !firstInp || !lastInp) return;
+                    <div class="account-divider"></div>
+                    <div class="form-section-label">Change Password <span class="hint-inline">(leave blank to keep your current password)</span></div>
+                    <div class="acct-form-grid">
+                        <div class="acct-form-group">
+                            <label>Current Password</label>
+                            <input type="password" name="current_password" autocomplete="current-password">
+                        </div>
+                        <div class="acct-form-group">
+                            <label>New Password <span class="hint-inline">(min. 5 characters)</span></label>
+                            <input type="password" name="new_password" autocomplete="new-password">
+                        </div>
+                    </div>
 
-    nameInp.addEventListener('input', function () {
-        var parts = nameInp.value.trim().split(/\s+/);
-        firstInp.value = parts.shift() || '';
-        lastInp.value  = parts.join(' ');
-    });
+                    <button type="submit" class="save-btn"><?php echo icon('save', 16); ?> Save Changes</button>
+                </form>
+            </div>
+        </div><!-- /view-account -->
 
-    function rebuild() {
-        nameInp.value = (firstInp.value.trim() + ' ' + lastInp.value.trim()).trim();
-    }
-    firstInp.addEventListener('input', rebuild);
-    lastInp.addEventListener('input', rebuild);
-})();
+        <!-- ══════ VIEW: NOTIFICATIONS ══════ -->
+        <div id="view-notifications" style="display:<?php echo $activeView === 'notifications' ? 'block' : 'none'; ?>;">
+            <div class="view-head">
+                <h1>Notifications</h1>
+                <p>School announcements and updates about your requests.</p>
+            </div>
 
-function previewAvatar(input) {
-    const file = input.files && input.files[0];
-    if (!file) return;
+            <div class="notif-toolbar">
+                <div class="notif-filter-pills">
+                    <button type="button" class="notif-pill active" onclick="filterNotifs('all', this)">
+                        All <span class="notif-pill-count" id="count-all"><?php echo count($notifications); ?></span>
+                    </button>
+                    <button type="button" class="notif-pill" onclick="filterNotifs('announcement', this)">
+                        <?php echo icon('megaphone', 14); ?> Announcements <span class="notif-pill-count" id="count-ann"><?php echo count(array_filter($notifications, fn($n) => $n['type'] === 'announcement')); ?></span>
+                    </button>
+                    <button type="button" class="notif-pill" onclick="filterNotifs('request', this)">
+                        <?php echo icon('clipboard', 14); ?> Request Status <span class="notif-pill-count" id="count-req"><?php echo count(array_filter($notifications, fn($n) => $n['type'] === 'request')); ?></span>
+                    </button>
+                </div>
+                <button type="button" class="btn-mark-all-read" onclick="markAllNotifsAsRead()"><?php echo icon('check', 13); ?> Mark all as read</button>
+            </div>
 
-    const reader = new FileReader();
-    reader.onload = function (e) {
-        // Swap the main circular avatar to show the newly picked photo immediately
-        const display = document.getElementById('avatar-display');
-        display.innerHTML = '<img src="' + e.target.result + '" alt="Profile photo preview">';
+            <div class="notif-list-container">
+                <?php if (empty($notifications)): ?>
+                    <div class="notif-empty-state">
+                        <div class="notif-empty-icon"><?php echo icon('bell', 34); ?></div>
+                        <h3>No notifications yet</h3>
+                        <p>Announcements and request updates will show up here.</p>
+                        <button type="button" class="btn-go-dash" onclick="showView('dashboard')">Back to Home</button>
+                    </div>
+                <?php else: ?>
+                    <div class="notif-cards-grid" id="notifCardsGrid" style="display:contents;">
+                        <?php foreach ($notifications as $n): ?>
+                            <div class="notif-card notif-type-<?php echo htmlspecialchars($n['type']); ?>"
+                                 data-type="<?php echo htmlspecialchars($n['type']); ?>"
+                                 data-id="<?php echo htmlspecialchars($n['id']); ?>"
+                                 data-time="<?php echo (int)$n['time']; ?>">
 
-        // Show the small "new file" chip under the avatar
-        const thumb = document.getElementById('avatar-new-thumb');
-        thumb.src = e.target.result;
-        thumb.classList.add('visible');
+                                <div class="notif-card-icon-wrap <?php echo htmlspecialchars($n['badge_cls']); ?>">
+                                    <span class="notif-card-icon"><?php echo icon($n['icon'], 18); ?></span>
+                                </div>
 
-        document.getElementById('avatar-new-name').textContent = file.name;
-        document.getElementById('avatar-new-preview').classList.add('visible');
-    };
-    reader.readAsDataURL(file);
-}
+                                <div class="notif-card-body">
+                                    <div class="notif-card-header">
+                                        <div class="notif-card-tags">
+                                            <span class="notif-badge <?php echo htmlspecialchars($n['badge_cls']); ?>">
+                                                <?php echo htmlspecialchars($n['badge']); ?>
+                                            </span>
+                                            <span class="notif-source-tag">
+                                                <?php echo $n['type'] === 'announcement' ? 'School Announcement' : 'Request Update'; ?>
+                                            </span>
+                                        </div>
+                                        <span class="notif-time"><?php echo htmlspecialchars($n['date_str']); ?></span>
+                                    </div>
 
-function clearAvatar() {
-    const input = document.getElementById('profile-photo-input');
-    input.value = '';
-    document.getElementById('avatar-new-preview').classList.remove('visible');
-    document.getElementById('avatar-new-thumb').classList.remove('visible');
-    document.getElementById('avatar-new-thumb').src = '';
-    document.getElementById('avatar-new-name').textContent = '';
-    // Note: this does not restore the original saved photo view if it was replaced above;
-    // reloading the page will show the saved photo again since nothing is submitted yet.
-}
-</script>
+                                    <h3 class="notif-card-title"><?php echo htmlspecialchars($n['title']); ?></h3>
 
+                                    <div class="notif-card-text">
+                                        <?php echo nl2br(htmlspecialchars($n['body'])); ?>
+                                    </div>
 
+                                    <?php if (!empty($n['rejection_reason'])): ?>
+                                        <div class="notif-rejection-callout">
+                                            <strong>Registrar's note:</strong> <?php echo htmlspecialchars($n['rejection_reason']); ?>
+                                        </div>
+                                    <?php endif; ?>
 
-        </div><!-- /main-container -->
-    </div><!-- /body-layout -->
+                                    <div class="notif-card-actions">
+                                        <?php if ($n['type'] === 'announcement'): ?>
+                                            <button type="button" class="notif-action-btn primary" onclick="showView('dashboard')">
+                                                View announcement <?php echo icon('chevron-right', 13); ?>
+                                            </button>
+                                        <?php elseif ($n['type'] === 'request'): ?>
+                                            <?php if (!empty($n['e_cert'])): ?>
+                                                <a href="../phpLogics/downloadCert.php?req_id=<?php echo (int)$n['req_id']; ?>" class="notif-action-btn success">
+                                                    <?php echo icon('award', 14); ?> Download e-Certificate
+                                                </a>
+                                            <?php endif; ?>
+                                            <button type="button" class="notif-action-btn secondary" onclick="showView('requests')">
+                                                Track request <?php echo icon('chevron-right', 13); ?>
+                                            </button>
+                                        <?php endif; ?>
+                                    </div>
+                                </div>
+                            </div>
+                        <?php endforeach; ?>
+                    </div>
+                <?php endif; ?>
+            </div>
+        </div><!-- /view-notifications -->
+
+    </main>
+
+    </div><!-- /.shell -->
+
+    <footer class="footer">
+        <div class="footer-inner">
+            <img class="footer-logo" src="<?php echo site_logo_url(); ?>" alt="HEHMS logo">
+            <div class="footer-name">Hilario E. Hermosa Memorial High School</div>
+            <div>© <?php echo date('Y'); ?> · Credential Request &amp; Tracking System</div>
+        </div>
+    </footer>
 
     <!-- ══ EDIT REQUEST MODAL ══ -->
     <div class="modal-overlay" id="editModal" onclick="closeEditModal(event)">
         <div class="modal-box modal-box--wide">
             <div class="modal-header">
                 <h3>Edit Request</h3>
-                <button class="modal-close" onclick="closeEditModal()">✕</button>
+                <button type="button" class="modal-close" onclick="closeEditModal()"><?php echo icon('x', 13); ?></button>
             </div>
             <div class="modal-body">
                 <form method="POST" action="../phpLogics/editReq.php" enctype="multipart/form-data">
@@ -1715,22 +1577,31 @@ function clearAvatar() {
                         </div>
                         <div class="form-group full" id="edit-gl-wrap" style="display:none;">
                             <label>Grade Level <span class="req-star">*</span></label>
-                            <input type="text" name="grade_level" id="edit-gl-input"
-                                placeholder="e.g. Grade 12" maxlength="20">
+                            <select name="grade_level" id="edit-gl-input">
+                                <?php echo render_select_options($gradeOptions, '', 'Select grade level…'); ?>
+                            </select>
                         </div>
                         <div class="form-group full" id="edit-sy-wrap" style="display:none;">
                             <label>School Year Last Attended <span class="req-star">*</span></label>
-                            <input type="text" name="school_year_last_attended" id="edit-sy-input"
-                                placeholder="e.g. 2024-2025" maxlength="20">
+                            <select name="school_year_last_attended" id="edit-sy-input">
+                                <?php echo render_select_options($syOptions, '', 'Select school year…'); ?>
+                            </select>
                         </div>
                         <div class="form-group full">
                             <label>Purpose / Reason <span class="req-star">*</span></label>
-                            <input type="text" name="purpose" id="edit-purpose" required>
+                            <select name="purpose" id="edit-purpose" onchange="toggleOtherPurpose('edit-purpose-other-input')">
+                                <option value="">Select a purpose…</option>
+                                <?php foreach ($purposeOptions as $pOpt): ?>
+                                    <option value="<?php echo htmlspecialchars($pOpt, ENT_QUOTES); ?>"><?php echo htmlspecialchars($pOpt); ?></option>
+                                <?php endforeach; ?>
+                                <option value="Other">Other — please specify</option>
+                            </select>
+                            <input type="text" name="purpose_other" id="edit-purpose-other-input" maxlength="255"
+                                placeholder="Please specify your purpose" style="display:none; margin-top:8px;">
                         </div>
                         <div class="form-group full">
-                            <label class="upload-label">
-                                Supporting Documents
-                                <span class="upload-hint">Upload a new file to replace · leave empty to keep current</span>
+                            <label>Valid ID
+                                <span class="upload-hint">upload a new file to replace · leave empty to keep current</span>
                             </label>
                             <div class="req-uploads-grid">
                                 <div class="req-upload-card" id="edit-card-id"
@@ -1741,9 +1612,9 @@ function clearAvatar() {
                                         accept="image/jpeg,image/png,image/gif,image/webp,application/pdf"
                                         onchange="cardFileSelected(this,'edit-card-id','edit-id-name','edit-id-preview')">
                                     <button type="button" class="ruc-remove-btn"
-                                        onclick="cardRemoveFile(event,'edit-card-id','edit-id-input','edit-id-name','edit-id-preview')">✕</button>
-                                    <span class="ruc-check">✅</span>
-                                    <span class="ruc-icon">🪪</span>
+                                        onclick="cardRemoveFile(event,'edit-card-id','edit-id-input','edit-id-name','edit-id-preview')"><?php echo icon('x', 11); ?></button>
+                                    <span class="ruc-check"><?php echo icon('check', 12); ?></span>
+                                    <span class="ruc-icon"><?php echo icon('id-card', 26); ?></span>
                                     <span class="ruc-title">Valid ID</span>
                                     <span class="ruc-optional">Optional</span>
                                     <p class="ruc-hint">Upload to replace current file</p>
@@ -1751,7 +1622,7 @@ function clearAvatar() {
                                     <div class="ruc-filename" id="edit-id-name"></div>
                                     <div class="ruc-existing-badge" id="edit-id-existing">
                                         <a id="edit-id-existing-link" href="#" target="_blank" onclick="event.stopPropagation()">
-                                            📎 View current file
+                                            <?php echo icon('paperclip', 13); ?> View current file
                                         </a>
                                         <div class="ruc-existing-replace-hint">Upload above to replace</div>
                                     </div>
@@ -1759,19 +1630,86 @@ function clearAvatar() {
                             </div>
                         </div>
                     </div>
-                    <button type="submit" name="edit_request" class="submit-btn">💾 Save Changes</button>
+                    <button type="submit" name="edit_request" class="submit-btn"><?php echo icon('save', 16); ?> Save Changes</button>
                 </form>
             </div>
         </div>
     </div>
 
-    
+    <!-- ══ PAGE-SPECIFIC STYLE FIXES (kept from previous design) ══ -->
+    <style>
+    .verify-badge { display: inline-block; font-size: .75rem; font-weight: 600; padding: 2px 8px; border-radius: 999px; margin-top: 4px; }
+    .verify-badge-verified { background: #d1fae5; color: #065f46; }
+    .verify-badge-pending  { background: #fef3c7; color: #92400e; }
+    .verify-badge-none     { background: #f3f4f6; color: #6b7280; }
+
+    .acct-form-group .acct-select {
+        -webkit-appearance: none; appearance: none;
+        width: 100%; box-sizing: border-box; font: inherit; color: inherit;
+        background-color: #fff; border: 1px solid #d1d5db; border-radius: 8px;
+        padding: 10px 36px 10px 12px; height: 44px; line-height: 1.2; cursor: pointer;
+        background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='9' viewBox='0 0 14 9'><path d='M1 1l6 6 6-6' stroke='%23667085' stroke-width='2' fill='none' fill-rule='evenodd' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+        background-repeat: no-repeat; background-position: right 12px center;
+    }
+
+    .ruc-svg-id, .ruc-svg-check {
+        display: inline-block; width: 28px; height: 28px;
+        background-repeat: no-repeat; background-position: center; background-size: contain;
+    }
+    </style>
+
+    <script>
+    /* ── Read-only Name display ⇄ First/Last name fields ───────────
+       The combined Name card is locked; it live-updates as the student
+       edits First Name / Last Name below it. */
+    (function () {
+        var nameInp  = document.getElementById('name-display-input');
+        var form     = document.getElementById('account-form');
+        var firstInp = form ? form.querySelector('input[name="first_name"]') : null;
+        var lastInp  = form ? form.querySelector('input[name="last_name"]') : null;
+        if (!nameInp || !firstInp || !lastInp) return;
+
+        function rebuild() {
+            nameInp.value = (firstInp.value.trim() + ' ' + lastInp.value.trim()).trim();
+        }
+        firstInp.addEventListener('input', rebuild);
+        lastInp.addEventListener('input', rebuild);
+    })();
+
+    function previewAvatar(input) {
+        const file = input.files && input.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = function (e) {
+            const display = document.getElementById('avatar-display');
+            display.innerHTML = '<img src="' + e.target.result + '" alt="Profile photo preview">';
+
+            const thumb = document.getElementById('avatar-new-thumb');
+            thumb.src = e.target.result;
+            thumb.classList.add('visible');
+
+            document.getElementById('avatar-new-name').textContent = file.name;
+            document.getElementById('avatar-new-preview').classList.add('visible');
+        };
+        reader.readAsDataURL(file);
+    }
+
+    function clearAvatar() {
+        document.getElementById('profile-photo-input').value = '';
+        document.getElementById('avatar-new-preview').classList.remove('visible');
+        document.getElementById('avatar-new-thumb').classList.remove('visible');
+        document.getElementById('avatar-new-thumb').src = '';
+        document.getElementById('avatar-new-name').textContent = '';
+    }
+    </script>
 
     <!-- Which documents ask for the Grade Level (from the DB, admin-managed
          per document) — must load BEFORE dashb.js, which reads it at parse time -->
     <script>window.DOC_GL_MAP = <?php echo json_encode($docGlMap, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;</script>
     <script>window.ACTIVE_DOC_TYPES = <?php echo json_encode($activeDocTypes, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;</script>
-    <script src="dashb.js"></script>
+    <script src="../assets/js/icons.js?v=2"></script>
+    <script src="dashb.js?v=2"></script>
     <script src="../assets/js/session-timeout.js" defer></script>
     <script>
         <?php if ($errorMsg): ?>showView('request');

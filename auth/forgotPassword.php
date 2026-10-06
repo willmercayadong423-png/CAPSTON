@@ -3,6 +3,7 @@ require __DIR__ . '/../database/db.php';   // db.php already loads config.php (r
 require_once __DIR__ . '/../vendor/autoload.php';
 require __DIR__ . '/../phpLogics/site_config.php';
 require_once __DIR__ . '/../phpLogics/audit.php';
+require_once __DIR__ . '/../phpLogics/icons.php';
 
 use PHPMailer\PHPMailer\PHPMailer;
 use PHPMailer\PHPMailer\Exception;
@@ -114,13 +115,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } else {
         // Match against student_id, first_name, AND last_name
         // (date_of_birth was removed from the system)
+        // Schema v5: student_id lives in student_profiles, role name in roles.
         $stmt = $conn->prepare("
-            SELECT id, first_name, last_name, email, student_id, role
-            FROM users
-            WHERE student_id    = ?
-              AND LOWER(first_name) = LOWER(?)
-              AND LOWER(last_name)  = LOWER(?)
-              AND status = 'active'
+            SELECT u.id, u.first_name, u.last_name, u.email,
+                   sp.student_id, r.role_name AS role
+            FROM users u
+            LEFT JOIN student_profiles sp ON sp.user_id = u.id
+            LEFT JOIN roles r            ON r.role_id  = u.role_id
+            WHERE sp.student_id    = ?
+              AND LOWER(u.first_name) = LOWER(?)
+              AND LOWER(u.last_name)  = LOWER(?)
+              AND u.status = 'active'
         ");
         $stmt->bind_param("sss", $student_id, $first_name, $last_name);
         $stmt->execute();
@@ -214,22 +219,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 <?php if ($step === 'success'): ?>
 
                     <div class="message success">
-                        <strong>✅ Credentials Sent!</strong>
+                        <strong><?php echo icon('check-circle', 14); ?> Credentials Sent!</strong>
                         <?= htmlspecialchars($message) ?><br><br>
                         Check your registered email inbox (and spam folder).
                     </div>
                     <p class="forgot-link" style="margin-top:20px;">
-                        <a href="mainPage.php">← Back to Login</a>
+                        <a href="mainPage.php"><?php echo icon('arrow-left', 13); ?> Back to Login</a>
                     </p>
 
                 <?php elseif ($step === 'error'): ?>
 
                     <div class="message">
-                        <strong>⚠️ Verification Failed</strong>
+                        <strong><?php echo icon('alert', 14); ?> Verification Failed</strong>
                         <?= htmlspecialchars($message) ?>
                     </div>
                     <p class="forgot-link" style="margin-top:20px;">
-                        <a href="forgotPassword.php">← Try Again</a>
+                        <a href="forgotPassword.php"><?php echo icon('arrow-left', 13); ?> Try Again</a>
                     </p>
 
                 <?php else: ?>

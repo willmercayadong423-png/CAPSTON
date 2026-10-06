@@ -85,6 +85,10 @@ document.addEventListener('DOMContentLoaded', function () {
         var btn = e.target.closest('.btn-release');
         if (!btn) return;
 
+        /* If Release was clicked from inside the details modal, close it
+           first — its z-index (9999) sits above the release modal. */
+        if (document.getElementById('file-modal').style.display === 'flex') closeModal();
+
         document.getElementById('rel-req-id').textContent =
             'Request #' + String(btn.dataset.reqId || '').padStart(4, '0');
         document.getElementById('rel-req-id-input').value = btn.dataset.reqId || '';
@@ -180,6 +184,35 @@ function switchView(view) {
     history.replaceState({}, '', '?view=' + view);
 }
 
+/* Jump to the requests table with a status chip activated — used by the
+   overdue banner's inline onclick (works regardless of listener state). */
+function jumpToRequests(status, view) {
+    view = view || 'main';
+    switchView(view);
+    var chips = document.getElementById('chips-' + view);
+    var chip = chips && chips.querySelector('[data-filter="' + (status || '') + '"]');
+    if (chip) chip.click();
+    var target = document.getElementById(view === 'main' ? 'view-main' : 'view-archived');
+    if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+/* ── Topbar avatar dropdown (same pattern as the student portal) ── */
+function toggleProfileMenu(event) {
+    event.stopPropagation();
+    document.getElementById("profileDropdown").classList.toggle("show");
+}
+
+function closeProfileMenu() {
+    document.getElementById("profileDropdown").classList.remove("show");
+}
+
+document.addEventListener("click", function (e) {
+    var menu = document.getElementById("profileDropdown");
+    var wrapper = document.querySelector(".header-avatar-wrapper");
+    if (!menu || !wrapper) return;
+    if (!wrapper.contains(e.target)) menu.classList.remove("show");
+});
+
 /* ── Restore the view from the URL (e.g. ?view=account after a save) ── */
 (function () {
     var v = new URLSearchParams(window.location.search).get('view');
@@ -240,7 +273,7 @@ function applyRowFilter(scope) {
             emptyRow = document.createElement('tr');
             emptyRow.className = 'filter-empty-row';
             emptyRow.innerHTML =
-                '<td colspan="7" class="empty-row">🔍 No requests match the current search / filter.</td>';
+                '<td colspan="7" class="empty-row">' + svgIcon('search', 15) + ' No requests match the current search / filter.</td>';
             tbody.appendChild(emptyRow);
         }
         emptyRow.style.display = '';
@@ -260,8 +293,8 @@ function filterTable(tbodyId, q) {
 
 /* Metadata for each requirement slot */
 var DOC_META = {
-    idPhoto:    { icon: '🪪', title: 'Valid ID',             tag: 'Required', cls: 'tag-req', field: 'id_photo' },
-    eCert:      { icon: '🎓', title: 'E-Certificate',        tag: 'Released', cls: 'tag-cert', field: 'e_certificate' }
+    idPhoto:    { icon: svgIcon('id-card', 15), title: 'Valid ID',             tag: 'Required', cls: 'tag-req', field: 'id_photo' },
+    eCert:      { icon: svgIcon('award', 15), title: 'E-Certificate',        tag: 'Released', cls: 'tag-cert', field: 'e_certificate' }
 };
 
 function openRequestModal(btn) {
@@ -292,6 +325,34 @@ function openRequestModal(btn) {
 
     /* Purpose */
     document.getElementById('modal-purpose').textContent = d.purpose || '—';
+
+    /* Contextual action bar — Accept (Pending) / Release (Processing) / Reject (active) */
+    var bar        = document.getElementById('modal-actions-bar');
+    var acceptForm = document.getElementById('modal-accept-form');
+    var releaseBtn = document.getElementById('modal-release-btn');
+    var rejectBtn  = document.getElementById('modal-reject-btn');
+    var isPending    = d.status === 'Pending';
+    var isProcessing = d.status === 'Processing';
+    var isActive     = isPending || isProcessing;
+
+    bar.style.display        = isActive ? '' : 'none';
+    acceptForm.style.display = isPending ? '' : 'none';
+    releaseBtn.style.display = isProcessing ? '' : 'none';
+    rejectBtn.style.display  = isActive ? '' : 'none';
+    bar.dataset.isPending    = isPending ? '1' : '0';
+
+    document.getElementById('mab-info').textContent = isPending
+        ? 'Verified the details? Accept to move this request to Processing.'
+        : 'Ready to hand over? Release generates and emails the e-certificate.';
+
+    document.getElementById('modal-accept-req-id').value = d.reqId || '';
+    releaseBtn.dataset.reqId   = d.reqId || '';
+    releaseBtn.dataset.student = d.student || '';
+    releaseBtn.dataset.doc     = d.doc || '';
+    rejectBtn.onclick = function () {
+        closeModal();
+        openRejectModal(String(d.reqId || ''));
+    };
 
     /* Requirement cards */
     renderDocs(d);
@@ -357,19 +418,19 @@ function buildDocCard(meta, filePath, reqId) {
         prev =
             '<div class="doc-thumb" title="Click to enlarge">' +
                 '<img src="' + escapeAttr(url) + '" alt="' + escapeAttr(meta.title) + '" loading="lazy">' +
-                '<span class="doc-zoom">🔍 Click to enlarge</span>' +
+                '<span class="doc-zoom">' + svgIcon('search', 11) + ' Click to enlarge</span>' +
             '</div>';
     } else if (isPdf) {
         prev =
             '<div class="doc-thumb doc-thumb-pdf" data-pdf="' + escapeAttr(url) + '" title="Open PDF viewer">' +
-                '<span class="pdf-icon">📄</span>' +
+                '<span class="pdf-icon">' + svgIcon('file-text', 22) + '</span>' +
                 '<span class="doc-fmt">PDF Document</span>' +
-                '<span class="doc-zoom">📖 Open viewer</span>' +
+                '<span class="doc-zoom">' + svgIcon('book', 14) + ' Open viewer</span>' +
             '</div>';
     } else {
         prev =
             '<div class="doc-thumb doc-thumb-file">' +
-                '<span class="pdf-icon">🗂️</span>' +
+                '<span class="pdf-icon">' + svgIcon('folder', 22) + '</span>' +
                 '<span class="doc-fmt">' + escapeAttr(ext.toUpperCase()) + ' File</span>' +
             '</div>';
     }
@@ -380,9 +441,9 @@ function buildDocCard(meta, filePath, reqId) {
             '<span class="doc-filename" title="' + escapeAttr(name) + '">' + escapeAttr(name) + '</span>' +
             '<span class="doc-actions">' +
                 (isPdf
-                    ? '<a class="doc-act" href="' + escapeAttr(url) + '" target="_blank" rel="noopener">👁 View</a>'
+                    ? '<a class="doc-act" href="' + escapeAttr(url) + '" target="_blank" rel="noopener">' + svgIcon('eye', 12) + ' View</a>'
                     : '') +
-                '<a class="doc-act doc-act-dl" href="' + escapeAttr(url) + '" download="' + escapeAttr(name) + '">⬇ Download</a>' +
+                '<a class="doc-act doc-act-dl" href="' + escapeAttr(url) + '" download="' + escapeAttr(name) + '">' + svgIcon('download', 12) + ' Download</a>' +
             '</span>' +
         '</div>';
 
@@ -394,9 +455,9 @@ function buildDocCard(meta, filePath, reqId) {
 function statusBadgeHtml(status, cancelledBy) {
     if (status === 'Cancelled') {
         if (cancelledBy === 'registrar') {
-            return '<span class="status rejected">Rejected</span>';
+            return '<span class="badge rejected">Rejected</span>';
         }
-        return '<span class="status cancelled">Cancelled</span>';   // by student
+        return '<span class="badge cancelled">Cancelled</span>';   // by student
     }
     var cls = {
         'Pending':          'pending',
@@ -404,7 +465,7 @@ function statusBadgeHtml(status, cancelledBy) {
         'Ready for Pickup': 'ready',
         'Released':         'released'
     }[status] || 'pending';
-    return '<span class="status ' + cls + '">' + escapeAttr(status) + '</span>';
+    return '<span class="badge ' + cls + '">' + escapeAttr(status) + '</span>';
 }
 
 function initialsOf(name) {
@@ -472,7 +533,16 @@ function loadRequestHistory(reqId) {
         .then(function (r) { return r.json(); })
         .then(function (data) {
             renderHistory(box, data);
-            renderStudentInfo(data && data.student);
+            renderStudentInfo(data);
+
+            /* Review lock note — when this Pending request was already
+               reviewed (viewed) earlier, student edits are locked. */
+            var mab = document.getElementById('mab-info');
+            if (mab && data && data.reviewed_at
+                && document.getElementById('modal-actions-bar').dataset.isPending === '1') {
+                mab.textContent = 'Student edits are LOCKED (office first reviewed this request on '
+                    + data.reviewed_at + '). ' + mab.textContent;
+            }
         })
         .catch(function () {
             box.innerHTML = '<p class="history-loading">Failed to load history.</p>';
@@ -481,19 +551,26 @@ function loadRequestHistory(reqId) {
         });
 }
 
-/* Student verification panel (school ID, LRN, grade, contact…) */
-function renderStudentInfo(s) {
+/* Student verification panel (school ID, LRN, grade/SY from the request, contact…) */
+function renderStudentInfo(data) {
     var box = document.getElementById('student-info');
+    var s   = data && data.student;
     if (!s) {
         box.innerHTML = '<p class="history-loading">No student record found.</p>';
         return;
     }
 
+    // Grade Level / Last SY are the values the student entered on THIS
+    // request (per-request snapshot) — not the account-level values.
+    var req = (data && data.request) || {};
+
     var fields = [
-        ['Student ID',        s.student_id],
-        ['LRN',               s.lrn],
-        ['Email',             s.email],
-        ['Contact Number',    s.contact]
+        ['Student ID',                s.student_id],
+        ['LRN',                       s.lrn],
+        ['Grade Level',               req.grade_level],
+        ['Last School Year Attended', req.school_year_last_attended],
+        ['Email',                     s.email],
+        ['Contact Number',            s.contact]
     ];
 
     var html = '';
@@ -521,11 +598,11 @@ function renderHistory(box, data) {
     if (data.same_doc_count > 0) {
         var lastTxt = data.same_doc_last ? ' — most recent was ' + data.same_doc_last : '';
         html += '<div class="history-banner repeat">'
-              + '🔁 This student already requested <strong>' + escapeAttr(data.current_doc || 'this document') + '</strong> '
+              + ' ' + svgIcon('repeat', 12) + ' This student already requested <strong>' + escapeAttr(data.current_doc || 'this document') + '</strong> '
               + data.same_doc_count + ' time(s) before' + lastTxt + '.'
               + '</div>';
     } else {
-        html += '<div class="history-banner first">✅ First time this student requests <strong>'
+        html += '<div class="history-banner first">' + svgIcon('check-circle', 12) + ' First time this student requests <strong>'
               + escapeAttr(data.current_doc || 'this document') + '</strong>.</div>';
     }
 
@@ -588,6 +665,16 @@ function closeModal() {
     document.getElementById('docs-grid').innerHTML       = '';
     document.getElementById('student-info').innerHTML    = '';
     document.getElementById('content-history').innerHTML = '';
+
+    /* Hide + reset the contextual action bar */
+    var bar = document.getElementById('modal-actions-bar');
+    if (bar) {
+        bar.style.display = 'none';
+        document.getElementById('modal-accept-form').style.display = 'none';
+        document.getElementById('modal-release-btn').style.display = 'none';
+        document.getElementById('modal-reject-btn').style.display  = 'none';
+        document.getElementById('mab-info').textContent = '';
+    }
 
     document.body.style.overflow = '';
 }

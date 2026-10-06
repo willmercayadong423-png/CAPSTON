@@ -1,43 +1,76 @@
 erDiagram
-    USERS ||--o{ DOCUMENT_REQUESTS : "places (1:N)"
-    USERS ||--o{ ANNOUNCEMENTS : "authors (1:N)"
+    %% ══════════════════════════════════════════════════════════════
+    %%  HEHMS — ERD (v5 — applied)
+    %%  · roles lookup table  (1=Student 2=Registrar 3=Admin)
+    %%  · student_profiles     (user_id, student_id, lrn,
+    %%                          grade_level, school_year_last_attended)
+    %%  · document_type_id FK  (requests -> document_types;
+    %%                          duplicate text column REMOVED)
+    %%  Applied to the live database 2026-10-06
+    %% ══════════════════════════════════════════════════════════════
+
+    ROLES ||--o{ USERS : "classifies"
+    USERS ||--|| STUDENT_PROFILES : "has (students only)"
+    USERS ||--o{ DOCUMENT_REQUESTS : "places"
+    DOCUMENT_TYPES ||--o{ DOCUMENT_REQUESTS : "categorizes"
+    USERS ||--o{ ANNOUNCEMENTS : "authors"
+    USERS ||--o{ AUDIT_LOGS : "generates"
+    USERS |o--o{ CREDENTIAL_RESEND_LOG : "triggers (soft ref by email)"
+
+    ROLES {
+        int role_id PK "1=Student 2=Registrar 3=Admin"
+        varchar role_name UK
+    }
 
     USERS {
         int id PK
-        varchar student_id UK "school number 2026-0001"
+        int role_id FK "replaces old varchar role"
         varchar first_name
         varchar last_name
-        varchar role "Student | Registrar | Admin"
-        varchar status "active | archived"
-        varchar email UK
+        varchar email UK "login identifier"
         varchar contact
         varchar password "bcrypt hash"
-        varchar lrn "Learner Reference No."
-        date date_of_birth
-        varchar grade_level
-        varchar strand
-        varchar school_year_last_attended
+        varchar status "active | archived"
         varchar profile_photo
+        int failed_login_count "security"
+        int lockout_count "security"
+        datetime locked_until "security"
         timestamp created_at
         timestamp updated_at
     }
 
+    STUDENT_PROFILES {
+        int user_id PK,FK "1:1 with users.id"
+        varchar student_id UK "school number 2026-0001 (moved)"
+        varchar lrn "12-digit Learner Ref No. (moved)"
+        varchar grade_level "Grade 11 | Grade 12 (moved)"
+        varchar school_year_last_attended "2024-2025 (moved)"
+    }
+
+    DOCUMENT_TYPES {
+        int id PK
+        varchar name UK "Good Moral, SF10, Diploma..."
+        tinyint requires_grade_level "1 = form asks grade level"
+        tinyint is_active "0 = hidden, kept for history"
+        int sort_order
+        datetime created_at
+    }
+
     DOCUMENT_REQUESTS {
         int id PK
-        int student_id FK
-        varchar document_type "Good Moral, SF10, Diploma..."
-        varchar purpose
-        enum status "Pending|Processing|Released|Cancelled"
-        varchar cancelled_by "student|registrar|unclaimed"
+        int user_id FK "who placed the request"
+        int document_type_id FK "real link to document_types"
+        varchar purpose "stated reason"
+        varchar grade_level "snapshot at request time"
+        varchar school_year_last_attended "snapshot at request time"
+        enum status "Pending|Processing|Ready for Pickup|Released|Cancelled"
+        varchar cancelled_by "student | registrar"
+        varchar rejection_reason
         datetime date_requested
+        datetime registrar_viewed_at "locks student editing"
         datetime date_released
-        timestamp updated_at
         varchar id_photo "uploaded requirement"
-        varchar auth_letter "uploaded requirement"
-        varchar receipt
-        varchar e_certificate "system-generated PDF"
-        varchar payment_method
-        varchar payment_status "Unpaid by default"
+        varchar e_certificate "generated PDF"
     }
 
     ANNOUNCEMENTS {
@@ -49,14 +82,27 @@ erDiagram
         datetime created_at
     }
 
-    SITE_SETTINGS {
-        varchar setting_key PK "logo_path | theme_color"
-        varchar setting_value
-        timestamp updated_at
+    AUDIT_LOGS {
+        int id PK
+        int user_id FK "NULL if account deleted"
+        varchar actor_name "snapshot at event time"
+        varchar actor_role
+        varchar action "LOGIN, STATUS_CHANGED, ..."
+        varchar entity "auth | document_request | user"
+        varchar entity_id "e.g. REQ-0005"
+        varchar details
+        varchar ip_address "IPv4/IPv6"
+        timestamp created_at
     }
 
     CREDENTIAL_RESEND_LOG {
         int id PK
-        varchar email
-        datetime requested_at "rate-limit: 3/hour"
+        varchar email "matches users.email (soft FK)"
+        datetime requested_at "rate-limit 3/hr"
+    }
+
+    SITE_SETTINGS {
+        varchar setting_key PK "logo_path | theme_color"
+        varchar setting_value
+        timestamp updated_at
     }

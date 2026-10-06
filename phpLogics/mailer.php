@@ -159,6 +159,76 @@ function send_status_email(string $toEmail, string $toName, string $reqNo, strin
  * API 3 — Notify a registrar account about a student action
  * (new request submitted, or a cancelled request restored)
  * ═══════════════════════════════════════════════════════════════════ */
+/* ── Overdue-request digest ──────────────────────────────────────
+ * For request backlogs: notifies every active registrar about requests
+ * still Pending after N days. The registrar dashboard triggers it at
+ * most ONCE per day (self-throttled via site_settings — no cron needed
+ * on XAMPP; a real deployment can call it from a scheduled task).
+ *
+ * send_overdue_digest(mysqli $conn, array $overdue, int $thresholdDays)
+ *   $overdue rows: ['req_no','student','document_type','days']
+ *   → ['ok' => bool, 'sent' => int recipients, 'error' => ?string] */
+function send_overdue_digest(mysqli $conn, array $overdue, int $thresholdDays): array
+{
+    if (empty($overdue)) {
+        return ['ok' => true, 'sent' => 0, 'error' => null];
+    }
+
+    $count  = count($overdue);
+    $oldest = 0;
+    $rows   = '';
+    foreach ($overdue as $o) {
+        $oldest = max($oldest, (int)$o['days']);
+        $rows .= "<tr>"
+            . "<td style='padding:7px 10px;border-bottom:1px solid #eee;font-weight:700;color:#4a6741;'>" . htmlspecialchars($o['req_no']) . "</td>"
+            . "<td style='padding:7px 10px;border-bottom:1px solid #eee;color:#555;'>" . htmlspecialchars($o['student']) . "</td>"
+            . "<td style='padding:7px 10px;border-bottom:1px solid #eee;color:#555;'>" . htmlspecialchars($o['document_type']) . "</td>"
+            . "<td style='padding:7px 10px;border-bottom:1px solid #eee;font-weight:700;color:#b45309;'>" . (int)$o['days'] . " day(s)</td>"
+            . "</tr>";
+    }
+
+    $subject = "\u{26A0} {$count} document request(s) waiting over {$thresholdDays} days \u{2014} HEHMS";
+
+    $regs = $conn->query(
+        "SELECT u.email, CONCAT(u.first_name,' ',u.last_name) AS name FROM users u
+         JOIN roles r ON r.role_id = u.role_id
+         WHERE LOWER(r.role_name) = 'registrar' AND LOWER(u.status) != 'archived'
+           AND u.email IS NOT NULL AND u.email <> ''"
+    );
+    if (!$regs || $regs->num_rows === 0) {
+        return ['ok' => false, 'sent' => 0, 'error' => 'No registrar recipients'];
+    }
+
+    $sent = 0;
+    $lastErr = null;
+    while ($rg = $regs->fetch_assoc()) {
+        try {
+            $mail = mailer_init($subject, $rg['email'], $rg['name']);
+            $mail->Body = mailer_template(
+                "Document requests need attention",
+                "<p style='color:#555;'>The following request(s) have been "
+                . "<strong style='color:#b45309;'>Pending for more than {$thresholdDays} days</strong>. "
+                . "The oldest has been waiting <strong>{$oldest} day(s)</strong>. "
+                . "Please review them in the Registrar Dashboard.</p>"
+                . "<table style='width:100%;border-collapse:collapse;margin:14px 0;font-size:13px;'>"
+                . "<tr style='background:#f5f7fa;'>"
+                . "<th style='padding:8px 10px;text-align:left;color:#333;'>Request</th>"
+                . "<th style='padding:8px 10px;text-align:left;color:#333;'>Student</th>"
+                . "<th style='padding:8px 10px;text-align:left;color:#333;'>Document</th>"
+                . "<th style='padding:8px 10px;text-align:left;color:#333;'>Waiting</th>"
+                . "</tr>" . $rows . "</table>"
+            );
+            $mail->send();
+            $sent++;
+        } catch (Throwable $e) {
+            $lastErr = $e->getMessage();
+            error_log("Overdue digest mail failed ({$rg['email']}): " . $lastErr);
+        }
+    }
+
+    return ['ok' => $sent > 0, 'sent' => $sent, 'error' => $lastErr];
+}
+
 function send_registrar_request_email(
     string $regEmail,
     string $regName,
@@ -260,8 +330,9 @@ function notifyStudentStatus(mysqli $conn, int $req_id, string $newStatus, ?stri
     }
 
     $q = $conn->prepare(
-        "SELECT s.email, s.first_name, s.last_name, dr.document_type
+        "SELECT s.email, s.first_name, s.last_name, dt.name AS document_type
          FROM document_requests dr
+         JOIN document_types dt ON dt.id = dr.document_type_id
          JOIN users s ON dr.user_id = s.id
          WHERE dr.id = ?"
     );

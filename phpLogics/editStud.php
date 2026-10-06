@@ -70,28 +70,38 @@ try {
         [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]
     );
 
-    // 🔍 Duplicate email check (exclude the student being edited)
-    $dup = $pdo->prepare("SELECT id FROM users WHERE email = ? AND student_id != ?");
-    $dup->execute([$email, $student_id]);
-    if ($dup->fetch()) {
-        echo json_encode(['success' => false, 'message' => 'Email already used by another account']);
-        exit;
-    }
-
-    // ── Remember the OLD role — the audit must show role changes explicitly ──
-    $old = $pdo->prepare("SELECT role FROM users WHERE student_id = ?");
-    $old->execute([$student_id]);
-    $oldRole = (string)($old->fetchColumn() ?: '');
-
-    // ── Fetch existing photo ───────────────────────────────────────
-    $stmt = $pdo->prepare("SELECT profile_photo FROM users WHERE student_id = ?");
-    $stmt->execute([$student_id]);
-    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    // 🔍 Resolve the account by school number (schema v5: student_profiles)
+    $find = $pdo->prepare("
+        SELECT u.id, r.role_name AS role, u.profile_photo
+        FROM users u
+        JOIN student_profiles sp ON sp.user_id = u.id
+        LEFT JOIN roles r ON r.role_id = u.role_id
+        WHERE sp.student_id = ?
+    ");
+    $find->execute([$student_id]);
+    $row = $find->fetch(PDO::FETCH_ASSOC);
 
     if (!$row) {
         echo json_encode(['success' => false, 'message' => 'Student not found']);
         exit;
     }
+
+    $user_id = (int)$row['id'];
+    // Remember the OLD role — the audit must show role changes explicitly
+    $oldRole = (string)($row['role'] ?? '');
+
+    // 🔍 Duplicate email check (exclude the account being edited)
+    $dup = $pdo->prepare("SELECT id FROM users WHERE email = ? AND id != ?");
+    $dup->execute([$email, $user_id]);
+    if ($dup->fetch()) {
+        echo json_encode(['success' => false, 'message' => 'Email already used by another account']);
+        exit;
+    }
+
+    // Resolve the new role to its lookup id
+    $roleLookup = $pdo->prepare("SELECT role_id FROM roles WHERE role_name = ?");
+    $roleLookup->execute([$role]);
+    $role_id = (int)$roleLookup->fetchColumn();
 
     $existing_photo = $row['profile_photo'] ?? null;
     $new_photo      = $existing_photo;
@@ -131,23 +141,21 @@ try {
             SET profile_photo = ?,
                 first_name    = ?,
                 last_name     = ?,
-                role          = ?,
+                role_id       = ?,
                 email         = ?,
                 contact       = ?,
-                lrn           = ?,
                 password      = ?
-            WHERE student_id = ?
+            WHERE id = ?
         ");
         $stmt->execute([
             $new_photo,
             $first,
             $last,
-            $role,
+            $role_id,
             $email,
             $contact,
-            $lrn,
             $hash,
-            $student_id
+            $user_id
         ]);
 
     } else {
@@ -156,23 +164,25 @@ try {
             SET profile_photo = ?,
                 first_name    = ?,
                 last_name     = ?,
-                role          = ?,
+                role_id       = ?,
                 email         = ?,
-                contact       = ?,
-                lrn           = ?
-            WHERE student_id = ?
+                contact       = ?
+            WHERE id = ?
         ");
         $stmt->execute([
             $new_photo,
             $first,
             $last,
-            $role,
+            $role_id,
             $email,
             $contact,
-            $lrn,
-            $student_id
+            $user_id
         ]);
     }
+
+    // Keep the academic profile in sync (LRN lives in student_profiles)
+    $pdo->prepare("UPDATE student_profiles SET lrn = ? WHERE user_id = ?")
+        ->execute([($lrn !== '' ? $lrn : null), $user_id]);
 
     // ── Audit: admin updated an account record ──
     audit_log($pdo, 'USER_UPDATED', 'user', $student_id,

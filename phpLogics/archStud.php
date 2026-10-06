@@ -26,7 +26,13 @@ if (!isset($_POST['student_id'])) {
 $id = trim($_POST['student_id']);
 
 // Never archive your own account (would lock out the registrar)
-$chk = $conn->prepare("SELECT id FROM users WHERE student_id = ?");
+// Schema v5: school numbers live in student_profiles
+$chk = $conn->prepare("
+    SELECT u.id
+    FROM users u
+    JOIN student_profiles sp ON sp.user_id = u.id
+    WHERE sp.student_id = ?
+");
 $chk->bind_param("s", $id);
 $chk->execute();
 $target = $chk->get_result()->fetch_assoc();
@@ -41,7 +47,7 @@ if ((int)$target['id'] === (int)($_SESSION['user_id'] ?? 0)) {
     exit;
 }
 
-$stmt = $conn->prepare("UPDATE users SET status = 'archived' WHERE student_id = ?");
+$stmt = $conn->prepare("UPDATE users SET status = 'archived' WHERE id = ?");
 
 if (!$stmt) {
     error_log("archStud prepare failed: " . $conn->error);
@@ -49,7 +55,8 @@ if (!$stmt) {
     exit;
 }
 
-$stmt->bind_param("s", $id);
+$target_id = (int)$target['id'];
+$stmt->bind_param("i", $target_id);
 
 if (!$stmt->execute()) {
     error_log("archStud execute failed: " . $stmt->error);

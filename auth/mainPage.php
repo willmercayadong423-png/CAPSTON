@@ -5,6 +5,7 @@
 include(__DIR__ . '/../database/db.php');
 include __DIR__ . '/../phpLogics/site_config.php';
 require_once __DIR__ . '/../phpLogics/audit.php';
+require_once __DIR__ . '/../phpLogics/icons.php';
 
 $errorMessage = "";
 $lockSeconds  = 0;   // > 0 → account temporarily locked, show a live countdown
@@ -43,15 +44,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['login'])) {
     // password containing leading/trailing spaces could never log in here.
     $password = (string)($_POST["password"] ?? '');
 
-    // Authentication is by e-mail OR Student ID (see schema.sql note:
+    // Authentication is by e-mail OR Student ID (see schema note:
     // "Authentication is by e-mail OR Student ID"). Both are unique
     // columns, so at most one account can ever match.
+    // Schema v5: role name lives in roles, student_id in student_profiles —
+    // the aliases keep every downstream $row[...] key identical.
     $stmt = $conn->prepare(
-        "SELECT *,
-                (locked_until IS NOT NULL AND locked_until > NOW()) AS is_locked,
-                IF(locked_until IS NOT NULL AND locked_until > NOW(),
-                   TIMESTAMPDIFF(SECOND, NOW(), locked_until), 0)    AS lock_seconds
-         FROM users WHERE email = ? OR student_id = ?"
+        "SELECT u.*,
+                r.role_name                 AS role,
+                sp.student_id               AS student_id,
+                sp.lrn                      AS lrn,
+                sp.grade_level              AS grade_level,
+                sp.school_year_last_attended AS school_year_last_attended,
+                (u.locked_until IS NOT NULL AND u.locked_until > NOW()) AS is_locked,
+                IF(u.locked_until IS NOT NULL AND u.locked_until > NOW(),
+                   TIMESTAMPDIFF(SECOND, NOW(), u.locked_until), 0)    AS lock_seconds
+         FROM users u
+         LEFT JOIN roles r            ON r.role_id  = u.role_id
+         LEFT JOIN student_profiles sp ON sp.user_id = u.id
+         WHERE u.email = ? OR sp.student_id = ?"
     );
     $stmt->bind_param("ss", $email, $email);
     $stmt->execute();
@@ -269,7 +280,7 @@ $heroSlides = [
                     <div class="field field--password">
                         <label for="password">Password</label>
                         <input type="password" name="password" id="password" required autocomplete="current-password">
-                        <button type="button" class="password-toggle" id="togglePassword" aria-label="Show password">👁</button>
+                        <button type="button" class="password-toggle" id="togglePassword" aria-label="Show password"><?php echo icon('eye', 15); ?></button>
                     </div>
 
                     <button type="submit" name="login" class="btn-primary">Sign in</button>
@@ -277,7 +288,7 @@ $heroSlides = [
                 </form>
 
                 <?php if ($errorMessage): ?>
-                    <div class="notice"<?php echo $lockSeconds > 0 ? ' id="lockNotice" data-seconds="' . (int)$lockSeconds . '"' : ''; ?>>⚠ <?php echo htmlspecialchars($errorMessage); ?></div>
+                    <div class="notice"<?php echo $lockSeconds > 0 ? ' id="lockNotice" data-seconds="' . (int)$lockSeconds . '"' : ''; ?>><?php echo icon('alert', 14); ?> <?php echo htmlspecialchars($errorMessage); ?></div>
                 <?php endif; ?>
 
                 <?php if (isset($_GET['loggedout'])): ?>
@@ -300,6 +311,7 @@ $heroSlides = [
 
     </div>
 
+    <script src="../assets/js/icons.js"></script>
     <script>
         // ── Auto-sliding hero photo panel ──────────────────────────────
         (function () {
@@ -355,10 +367,10 @@ $heroSlides = [
         togglePassword.addEventListener("click", function () {
             if (passwordInput.type === "password") {
                 passwordInput.type = "text";
-                togglePassword.textContent = "🙈";
+                togglePassword.innerHTML = svgIcon("eye-off", 15);
             } else {
                 passwordInput.type = "password";
-                togglePassword.textContent = "👁";
+                togglePassword.innerHTML = svgIcon("eye", 15);
             }
         });
 
@@ -375,7 +387,7 @@ $heroSlides = [
             function tick() {
                 if (s <= 0) {
                     clearInterval(timer);
-                    box.textContent = '⚠ The lock has expired — you may try signing in now.';
+                    box.textContent = 'The lock has expired — you may try signing in now.';
                     return;
                 }
                 var m = Math.floor(s / 60), r = s % 60;

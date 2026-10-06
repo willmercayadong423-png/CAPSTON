@@ -85,8 +85,8 @@ try {
         exit;
     }
 
-    // 🎓 Generate student ID
-    $lastStudent = $pdo->prepare("SELECT student_id FROM users WHERE student_id LIKE ? ORDER BY id DESC LIMIT 1");
+    // 🎓 Generate student ID (schema v5: school numbers live in student_profiles)
+    $lastStudent = $pdo->prepare("SELECT student_id FROM student_profiles WHERE student_id LIKE ? ORDER BY user_id DESC LIMIT 1");
     $lastStudent->execute([$year . '-%']);
     $lastId     = $lastStudent->fetchColumn();
     $seq        = $lastId ? intval(substr($lastId, 5)) + 1 : 1;
@@ -118,29 +118,41 @@ try {
         }
     }
 
-    // 💾 Insert new account
+    // 💾 Insert new account (schema v5: role via roles lookup,
+    // academic data via student_profiles)
     // NOTE: the plain-text password is intentionally NOT stored anymore.
     // It is emailed once below; "Forgot Credentials" issues a temp password.
+    $roleLookup = $pdo->prepare("SELECT role_id FROM roles WHERE role_name = ?");
+    $roleLookup->execute([$role]);
+    $role_id = (int)$roleLookup->fetchColumn();
+
     $insert = $pdo->prepare("
         INSERT INTO users
-            (student_id, profile_photo, first_name, last_name, role, email, contact,
-             lrn,
+            (role_id, profile_photo, first_name, last_name, email, contact,
              status, password)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     ");
 
     $insert->execute([
-        $student_id,
+        $role_id,
         $new_photo,
         $first,
         $last,
-        $role,
         $email,
         $contact,
-        $lrn,
         'active',
         $hash,
     ]);
+
+    // Student accounts get their academic profile (school number + LRN);
+    // staff accounts have no profile row.
+    if ($role_id === 1) {
+        $profile = $pdo->prepare("
+            INSERT INTO student_profiles (user_id, student_id, lrn)
+            VALUES (?, ?, ?)
+        ");
+        $profile->execute([$pdo->lastInsertId(), $student_id, ($lrn !== '' ? $lrn : null)]);
+    }
 
     // ── Audit: admin created a new account ──
     audit_log($pdo, 'USER_CREATED', 'user', $student_id,

@@ -10,10 +10,11 @@ if (strtolower($_SESSION['role']) !== 'admin') {
 $student_id = trim($_GET['student_id'] ?? '');
 if ($student_id === '') { echo json_encode([]); exit(); }
 
-$sql = "SELECT document_type, COUNT(*) as cnt
-        FROM document_requests
-        WHERE user_id IN (SELECT id FROM users WHERE student_id = ?)
-        GROUP BY document_type";
+$sql = "SELECT dt.name AS document_type, COUNT(*) as cnt
+        FROM document_requests dr
+        JOIN document_types dt ON dt.id = dr.document_type_id
+        WHERE dr.user_id IN (SELECT sp.user_id FROM student_profiles sp WHERE sp.student_id = ?)
+        GROUP BY dt.name";
 
 $stmt = $conn->prepare($sql);
 $stmt->bind_param("s", $student_id);

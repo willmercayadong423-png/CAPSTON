@@ -310,6 +310,14 @@ function render_certificate_html(array $d): string
 
     // Issuance line no longer needed here — the official wording carries
     // the date inside the body ("issued this 22nd day of SEPTEMBER, 2026 …").
+
+    // Contact email — same admin-managed source as the site footer /
+    // verify page (site_config loaded on demand for preview/standalone use)
+    if (!function_exists('site_setting')) {
+        require_once __DIR__ . '/site_config.php';
+    }
+    $contactEmail = site_setting('contact_email', 'hehmhsadmin@gmail.com');
+
     return str_replace(
         [
             '{{LOGO_IMG}}',
@@ -321,6 +329,7 @@ function render_certificate_html(array $d): string
             '{{REQ_NO}}',
             '{{OFFICER_NAME}}',
             '{{OFFICER_TITLE}}',
+            '{{CONTACT_EMAIL}}',
         ],
         [
             $logo,
@@ -332,6 +341,7 @@ function render_certificate_html(array $d): string
             $esc($d['req_no']),
             $esc($d['officer_name']),
             $esc($d['officer_title']),
+            $esc($contactEmail),
         ],
         $tpl
     );

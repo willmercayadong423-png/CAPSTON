@@ -8,7 +8,7 @@ When you're ready, pick ONE option below and paste its block into
 
 ## Why change anything?
 
-The system currently sends through a **free Gmail account** (`hehmsadmin@gmail.com`).
+The system currently sends through a **free Gmail account** (`hehmhsadmin@gmail.com`).
 Gmail free accounts are capped at roughly **500 recipients per day** (sometimes
 lower for new accounts), and the cap resets at **midnight Pacific time
 (~3:00 PM Philippine time)**. On 2026-10-08 the cap was hit and every mail

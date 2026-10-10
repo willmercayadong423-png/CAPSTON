@@ -55,6 +55,15 @@ if ($conn->connect_error) {
 // which mangles accented characters in student names).
 $conn->set_charset('utf8mb4');
 
+/* ── One timezone everywhere: Asia/Manila (+08:00) ──────────────────
+ * PHP's date() and MySQL's NOW()/CURDATE() otherwise follow the
+ * server's default (usually UTC) — on shared hosting that varies,
+ * and it skewed dev timestamps by 8h. Pinning both here makes
+ * date_requested / date_released, certificate dates and the monthly
+ * report's month cutoff behave identically on every machine. */
+date_default_timezone_set('Asia/Manila');
+@$conn->query("SET time_zone = '+08:00'");
+
 /* ── Normalize user-supplied text to VALID UTF-8 ─────────────────────
  * MySQL's utf8mb4 tables reject byte sequences that are not valid
  * UTF-8 (classic case: text pasted from Windows-1252 sources, where

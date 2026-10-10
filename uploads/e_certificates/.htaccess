@@ -1,0 +1,5 @@
+# E-certificates are released documents — never serve them directly.
+# Viewing/downloading must go through the authenticated endpoints:
+#   phpLogics/downloadCert.php    (the owning student)
+#   phpLogics/downloadReqFile.php (registrar / admin)
+Require all denied

@@ -1,0 +1,5 @@
+# Student valid-ID uploads are personal data — never serve them directly.
+# Viewing/downloading must go through the authenticated endpoints:
+#   phpLogics/download.php      (the owning student)
+#   phpLogics/downloadReqFile.php (registrar / admin)
+Require all denied

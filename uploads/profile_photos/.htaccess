@@ -1,0 +1,5 @@
+# Profile photos are personal data — never serve them directly.
+# Viewing must go through the authenticated endpoint:
+#   phpLogics/download_profile.php  (own photo, or any photo for
+#                                    registrar/admin via ?user_id=N)
+Require all denied

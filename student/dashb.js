@@ -68,7 +68,7 @@ function selectDocument(docName) {
     if (d1) d1.classList.remove('active');
     if (d2) d2.classList.add('active');
 
-    sessionStorage.setItem('hehms_selected_doc', docName);
+    sessionStorage.setItem('hehmhs_selected_doc', docName);
 
     history.replaceState({}, '', '?view=request&step=form');
 }
@@ -82,7 +82,7 @@ function backToStep1() {
     if (d1) d1.classList.add('active');
     if (d2) d2.classList.remove('active');
 
-    sessionStorage.removeItem('hehms_selected_doc');
+    sessionStorage.removeItem('hehmhs_selected_doc');
 
     history.replaceState({}, "", "?view=request");
 }
@@ -631,7 +631,7 @@ function notifStorageSet(key, val) { try { localStorage.setItem(key, val); } cat
 function notifStorageGet(key)     { try { return localStorage.getItem(key); } catch (e) { return null; } }
 
 function markAllNotifsAsRead() {
-    notifStorageSet('hehms_student_notif_last_seen', Date.now().toString());
+    notifStorageSet('hehmhs_student_notif_last_seen', Date.now().toString());
 
     // Visually unmark unread state (full view cards + bell panel items)
     document.querySelectorAll('.notif-card.is-unread').forEach(function (card) {
@@ -663,7 +663,7 @@ function markAllNotifsAsRead() {
 }
 
 function initNotificationsReadState() {
-    const lastSeenStr = notifStorageGet('hehms_student_notif_last_seen');
+    const lastSeenStr = notifStorageGet('hehmhs_student_notif_last_seen');
     const lastSeen = lastSeenStr ? parseInt(lastSeenStr, 10) : 0;
 
     let unreadCount = 0;
@@ -716,7 +716,7 @@ window.addEventListener('DOMContentLoaded', function () {
 
     if (view === 'request') {
 
-        const savedDoc = sessionStorage.getItem('hehms_selected_doc');
+        const savedDoc = sessionStorage.getItem('hehmhs_selected_doc');
 
         if (step === 'form') {
             // A doc saved in sessionStorage may have become locked (request
@@ -724,7 +724,7 @@ window.addEventListener('DOMContentLoaded', function () {
             // back to the selection step instead of restoring a taken doc.
             if (savedDoc && window.ACTIVE_DOC_TYPES
                 && Object.prototype.hasOwnProperty.call(window.ACTIVE_DOC_TYPES, savedDoc)) {
-                sessionStorage.removeItem('hehms_selected_doc');
+                sessionStorage.removeItem('hehmhs_selected_doc');
                 history.replaceState({}, '', '?view=request');
                 return;
             }
@@ -810,7 +810,7 @@ document.querySelectorAll('.req-upload-card').forEach(function (card) {
 
 document.getElementById('request-form').addEventListener('submit', function () {
     window.onbeforeunload = null;
-    sessionStorage.removeItem('hehms_selected_doc');
+    sessionStorage.removeItem('hehmhs_selected_doc');
 });
 /* ── Toggle fields when the doc type changes in the edit modal ── */
 document.getElementById('edit-doc-type').addEventListener('change', function () {

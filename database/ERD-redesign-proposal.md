@@ -1,4 +1,4 @@
-# HEHMS — ERD Redesign Proposal v5 (**APPLIED** 2026-10-06)
+# HEHMHS — ERD Redesign Proposal v5 (**APPLIED** 2026-10-06)
 
 > **Status:** ✅ **Applied and verified end-to-end.** Migration file:
 > `database/migrate_erd_v5.sql`. Pre-migration backup:

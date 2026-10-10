@@ -1,4 +1,4 @@
-# HEHMS — SMTP / Email Delivery Setup Guide
+# HEHMHS — SMTP / Email Delivery Setup Guide
 
 **Status:** PREPARED — nothing in `database/config.php` has been changed yet.
 When you're ready, pick ONE option below and paste its block into
@@ -27,7 +27,7 @@ sending setup. Options, easiest first.
    **SMTP & API → SMTP → Create a new SMTP key** — copy the generated key
    (it looks like `xkeysib-…`).
 3. Verify the **sender**: **Senders & IP → Senders → Add a sender**
-   (e.g. `registrar@hehms.edu.ph` or your Gmail — must be confirmed once).
+   (e.g. `registrar@hehmhs.edu.ph` or your Gmail — must be confirmed once).
 4. Paste this into `database/config.php` (replace the old SMTP block):
 
 ```php
@@ -38,7 +38,7 @@ define('SMTP_PASS',   'xkeysib-YOUR_GENERATED_SMTP_KEY');
 define('SMTP_PORT',   587);
 define('SMTP_SECURE', 'tls'); // STARTTLS
 define('SMTP_FROM',   'YOUR_VERIFIED_SENDER@ADDRESS');
-define('SMTP_FROM_NAME', 'HEHMS Registrar');
+define('SMTP_FROM_NAME', 'HEHMHS Registrar');
 ```
 
 > 300 mails/day free, dedicated transactional relay, no "daily user limit"
@@ -49,7 +49,7 @@ define('SMTP_FROM_NAME', 'HEHMS Registrar');
 ## Option B — Google Workspace (keeps Gmail · 2,000/day)
 
 If the school has (or gets) a Google Workspace subscription
-(`@hehms.edu.ph` domain):
+(`@hehmhs.edu.ph` domain):
 
 1. Enable **2-Step Verification** on the sending account.
 2. Google Account → Security → **App passwords** → generate one for "Mail".
@@ -58,12 +58,12 @@ If the school has (or gets) a Google Workspace subscription
 ```php
 // ── SMTP (mail sending) — Google Workspace ──
 define('SMTP_HOST',   'smtp.gmail.com');
-define('SMTP_USER',   'registrar@hehms.edu.ph');      // Workspace account
+define('SMTP_USER',   'registrar@hehmhs.edu.ph');      // Workspace account
 define('SMTP_PASS',   'YOUR_16_CHAR_APP_PASSWORD');   // no spaces needed
 define('SMTP_PORT',   587);
 define('SMTP_SECURE', 'tls'); // STARTTLS
-define('SMTP_FROM',   'registrar@hehms.edu.ph');
-define('SMTP_FROM_NAME', 'HEHMS Registrar');
+define('SMTP_FROM',   'registrar@hehmhs.edu.ph');
+define('SMTP_FROM_NAME', 'HEHMHS Registrar');
 ```
 
 > 2,000 recipients/day. Same code, only credentials change.
@@ -85,7 +85,7 @@ define('SMTP_PASS',   'SG.YOUR_SENDGRID_API_KEY');
 define('SMTP_PORT',   587);
 define('SMTP_SECURE', 'tls'); // STARTTLS
 define('SMTP_FROM',   'YOUR_VERIFIED_SENDER@ADDRESS');
-define('SMTP_FROM_NAME', 'HEHMS Registrar');
+define('SMTP_FROM_NAME', 'HEHMHS Registrar');
 ```
 
 > 100/day free — fine for small volume; tighter than Brevo.
@@ -97,7 +97,7 @@ define('SMTP_FROM_NAME', 'HEHMS Registrar');
 From the project root (Laragon PHP):
 
 ```
-C:\laragon\bin\php\php-<version>\php.exe -r "require 'vendor/autoload.php'; require 'database/config.php'; $m = new PHPMailer\PHPMailer\PHPMailer(true); $m->isSMTP(); $m->Host=SMTP_HOST; $m->SMTPAuth=true; $m->Username=SMTP_USER; $m->Password=SMTP_PASS; $m->SMTPSecure='tls'; $m->Port=SMTP_PORT; $m->setFrom(SMTP_FROM, SMTP_FROM_NAME); $m->addAddress('YOUR_OWN_EMAIL'); $m->Subject='HEHMS SMTP test'; $m->Body='It works.'; $m->send(); echo 'SENT OK';"
+C:\laragon\bin\php\php-<version>\php.exe -r "require 'vendor/autoload.php'; require 'database/config.php'; $m = new PHPMailer\PHPMailer\PHPMailer(true); $m->isSMTP(); $m->Host=SMTP_HOST; $m->SMTPAuth=true; $m->Username=SMTP_USER; $m->Password=SMTP_PASS; $m->SMTPSecure='tls'; $m->Port=SMTP_PORT; $m->setFrom(SMTP_FROM, SMTP_FROM_NAME); $m->addAddress('YOUR_OWN_EMAIL'); $m->Subject='HEHMHS SMTP test'; $m->Body='It works.'; $m->send(); echo 'SENT OK';"
 ```
 
 (`php composer.phar`-installed PHPMailer is used — no other dependency.)

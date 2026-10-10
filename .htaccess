@@ -27,7 +27,7 @@ RewriteRule ^ error.php [L]
 # (denied files/folders, script errors).
 #
 # ⚠ DEPLOYMENT STEP — these paths include the project folder name:
-#   1. If the folder is renamed (recommended: deploy as `hehms`, no
+#   1. If the folder is renamed (recommended: deploy as `hehmhs`, no
 #      space), update the paths below to match.
 #   2. If deploying to the domain root, change them to /error.php.
 ErrorDocument 403 /NEW%20UPCAP/error.php

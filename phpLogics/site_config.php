@@ -21,7 +21,7 @@ if (!function_exists('site_settings')) {
             'logo_path'       => 'assets/img/Logo.png',
             'theme_color'     => '#6b8f3a',
             'office_hours'    => 'Monday to Friday, 8:00 AM – 4:00 PM',
-            'contact_email'   => 'registrar@hehms.edu.ph',
+            'contact_email'   => 'registrar@hehmhs.edu.ph',
             'contact_phone'   => '(044) 123-4567',
             'contact_location'=> 'Hilario E. Hermosa Memorial High School, Siclong, Laur, Nueva Ecija',
         ];

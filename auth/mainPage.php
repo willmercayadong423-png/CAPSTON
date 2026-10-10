@@ -185,7 +185,7 @@ $loginCsrfToken = $_SESSION['csrf_token'];
 // Hero photo panel — replace with real campus/school photos in assets/img/.
 // Add or remove array entries and the panel adjusts automatically.
 $heroSlides = [
-    ["img" => "../assets/img/hehms.jpg", "caption" => "Hilario E. Hermosa Memorial High School"],
+    ["img" => "../assets/img/hehmhs.jpg", "caption" => "Hilario E. Hermosa Memorial High School"],
     ["img" => "../assets/img/inservice.jpg", "caption" => "In-Service Training"],
     ["img" => "../assets/img/by.jpg", "caption" => "School Activities"],
 ];

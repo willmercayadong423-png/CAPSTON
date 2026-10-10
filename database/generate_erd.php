@@ -151,7 +151,7 @@ $html = '<!DOCTYPE html>
 </head>
 <body>
     <h1>HEHMHS Credential Request &amp; Tracking System — <span>Entity Relationship Diagram</span></h1>
-    <div class="sub">Hilario E. Hermosa Memorial High School · database <code>hehms</code> · generated ' . date('M j, Y') . ' from the live schema (database/generate_erd.php)</div>
+    <div class="sub">Hilario E. Hermosa Memorial High School · database <code>hehmhs</code> · generated ' . date('M j, Y') . ' from the live schema (database/generate_erd.php)</div>
 
     <div class="grid">' . $cards . '</div>
 

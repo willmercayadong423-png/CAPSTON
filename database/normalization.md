@@ -1,7 +1,7 @@
-# HEHMS — Database Normalization (UNF → 1NF → 2NF → 3NF)
+# HEHMHS — Database Normalization (UNF → 1NF → 2NF → 3NF)
 
 > Companion to `ERD-redesign-proposal.md`. The final 3NF result of this
-> walkthrough **is the live `hehms` database** — every table below maps to
+> walkthrough **is the live `hehmhs` database** — every table below maps to
 > a real table in the system (see §7).
 >
 > **The story for the panel:** before this system, the registrar kept

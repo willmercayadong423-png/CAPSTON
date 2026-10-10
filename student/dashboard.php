@@ -789,9 +789,10 @@ $avatarInitials = strtoupper(substr($student['first_name'], 0, 1) . substr($stud
     <title>Student Portal — HEHMHS</title>
     <script>
         // One-time cleanup: dark mode has been removed, but some browsers
-        // may still have 'hehms-theme: dark' saved from before. Clear it
-        // so nobody gets stuck with no way to switch it off.
+        // may still have the old 'hehms-theme: dark' key saved from before
+        // (pre-rename spelling) — clear both spellings so nobody gets stuck.
         localStorage.removeItem('hehms-theme');
+        localStorage.removeItem('hehmhs-theme');
         document.documentElement.removeAttribute('data-theme');
     </script>
     <link rel="stylesheet" href="portal.css?v=2">
@@ -996,7 +997,7 @@ $avatarInitials = strtoupper(substr($student['first_name'], 0, 1) . substr($stud
                 <div class="card">
                     <h3><?php echo icon('building', 16); ?> Registrar's Office</h3>
                     <div class="info-row"><span class="ic"><?php echo icon('clock', 15); ?></span><div><strong>Office hours</strong><?php echo htmlspecialchars(site_setting('office_hours', 'Monday to Friday, 8:00 AM – 4:00 PM')); ?></div></div>
-                    <div class="info-row"><span class="ic"><?php echo icon('mail', 15); ?></span><div><strong>Email</strong><?php echo htmlspecialchars(site_setting('contact_email', 'registrar@hehms.edu.ph')); ?></div></div>
+                    <div class="info-row"><span class="ic"><?php echo icon('mail', 15); ?></span><div><strong>Email</strong><?php echo htmlspecialchars(site_setting('contact_email', 'registrar@hehmhs.edu.ph')); ?></div></div>
                     <div class="info-row"><span class="ic"><?php echo icon('phone', 15); ?></span><div><strong>Phone</strong><?php echo htmlspecialchars(site_setting('contact_phone', '(044) 123-4567')); ?></div></div>
                     <div class="info-row"><span class="ic"><?php echo icon('map-pin', 15); ?></span><div><strong>Location</strong><?php echo htmlspecialchars(site_setting('contact_location', 'Siclong, Laur, Nueva Ecija')); ?></div></div>
                 </div>

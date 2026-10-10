@@ -1,9 +1,9 @@
 -- ══════════════════════════════════════════════════════════════════
--- HEHMS ERD v5 migration — roles + student_profiles + document_type_id
+-- HEHMHS ERD v5 migration — roles + student_profiles + document_type_id
 -- Backup taken: dumps/backup_pre_erd_migration_20261006_173106.sql
 -- Run as one file (mysql stops at the first error).
 -- ══════════════════════════════════════════════════════════════════
-USE hehms;
+USE hehmhs;
 
 -- A. Roles lookup table ────────────────────────────────────────────
 CREATE TABLE roles (

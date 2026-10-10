@@ -17,7 +17,7 @@
  *       /tr "C:\laragon\bin\php\php-8.3.33-Win32-vs16-x64\php.exe \"C:\laragon\www\NEW UPCAP\phpLogics\cron_monthly_report.php\""
  *
  * Linux deployment equivalent (crontab):
- *   30 0 * * * /usr/bin/php /var/www/hehms/phpLogics/cron_monthly_report.php
+ *   30 0 * * * /usr/bin/php /var/www/hehmhs/phpLogics/cron_monthly_report.php
  *
  * The run is SELF-THROTTLED (site_settings 'monthly_report_last_sent'):
  * scheduled daily, it quietly does nothing all month and e-mails the

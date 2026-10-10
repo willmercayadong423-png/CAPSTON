@@ -7,11 +7,11 @@
 
 // ── Database ──
 // Production: create a dedicated MySQL user with a strong password
-// (GRANT SELECT,INSERT,UPDATE,DELETE ON hehms.* TO 'hehms_app'@'localhost';)
+// (GRANT SELECT,INSERT,UPDATE,DELETE ON hehmhs.* TO 'hehmhs_app'@'localhost';)
 // instead of root with an empty password (XAMPP default, local dev only).
 define('DB_HOST', 'localhost');
-define('DB_NAME', 'hehms');
-define('DB_USER', 'hehms_app');
+define('DB_NAME', 'hehmhs');
+define('DB_USER', 'hehmhs_app');
 define('DB_PASS', 'CHANGE_ME');
 
 // ── SMTP (mail sending) ──

@@ -41,7 +41,7 @@ use chillerlan\QRCode\Output\QRGdImagePNG;
  * ═══════════════════════════════════════════════════════════════════ */
 function certificate_verify_code(int $reqId): string
 {
-    $secret = defined('VERIFICATION_SECRET') ? VERIFICATION_SECRET : 'hehms-verify';
+    $secret = defined('VERIFICATION_SECRET') ? VERIFICATION_SECRET : 'hehmhs-verify';
     return substr(hash_hmac('sha256', 'certificate:' . $reqId, $secret), 0, 16);
 }
 

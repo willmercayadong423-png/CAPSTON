@@ -22,7 +22,7 @@
 (function () {
     'use strict';
 
-    var overlayId = 'hehms-offline-overlay';
+    var overlayId = 'hehmhs-offline-overlay';
     var shownAt = 0;          // timestamp when the overlay appeared
     var reloadTimer = null;   // retry-while-offline interval
 

@@ -801,7 +801,7 @@ if (!function_exists('audit_badge_class')) {
                         <div class="account-divider"></div>
                         <h3><?php echo icon('info', 16); ?> Registrar's Office</h3>
                         <div class="info-row"><span class="ic"><?php echo icon('clock', 15); ?></span><div><strong>Office hours</strong><?php echo htmlspecialchars(site_setting('office_hours', 'Monday to Friday, 8:00 AM – 4:00 PM')); ?></div></div>
-                        <div class="info-row"><span class="ic"><?php echo icon('mail', 15); ?></span><div><strong>Email</strong><?php echo htmlspecialchars(site_setting('contact_email', 'registrar@hehms.edu.ph')); ?></div></div>
+                        <div class="info-row"><span class="ic"><?php echo icon('mail', 15); ?></span><div><strong>Email</strong><?php echo htmlspecialchars(site_setting('contact_email', 'registrar@hehmhs.edu.ph')); ?></div></div>
                         <div class="info-row"><span class="ic"><?php echo icon('phone', 15); ?></span><div><strong>Phone</strong><?php echo htmlspecialchars(site_setting('contact_phone', '(044) 123-4567')); ?></div></div>
                         <div class="info-row"><span class="ic"><?php echo icon('map-pin', 15); ?></span><div><strong>Location</strong><?php echo htmlspecialchars(site_setting('contact_location', 'Siclong, Laur, Nueva Ecija')); ?></div></div>
                     </div>
@@ -1103,7 +1103,7 @@ if (!function_exists('audit_badge_class')) {
                         <div class="form-group">
                             <label>Registrar Email</label>
                             <input type="email" id="set-contact-email" maxlength="150"
-                                value="<?php echo htmlspecialchars(site_setting('contact_email', 'registrar@hehms.edu.ph')); ?>">
+                                value="<?php echo htmlspecialchars(site_setting('contact_email', 'registrar@hehmhs.edu.ph')); ?>">
                         </div>
                         <div class="form-group">
                             <label>Contact Phone</label>

@@ -37,7 +37,7 @@ try {
     $pdf = render_monthly_report_pdf($conn, $month);
 
     header('Content-Type: application/pdf');
-    header('Content-Disposition: inline; filename="hehms_report_' . $month . '.pdf"');
+    header('Content-Disposition: inline; filename="hehmhs_report_' . $month . '.pdf"');
     header('Cache-Control: private, no-cache, must-revalidate');
     echo $pdf;
 } catch (Throwable $e) {

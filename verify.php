@@ -61,7 +61,7 @@ if ($hadParams) {
 }
 
 function e(string $s): string { return htmlspecialchars($s, ENT_QUOTES, 'UTF-8'); }
-$registrarEmail = e(site_setting('contact_email', 'registrar@hehms.edu.ph'));
+$registrarEmail = e(site_setting('contact_email', 'registrar@hehmhs.edu.ph'));
 $registrarPhone = e(site_setting('contact_phone', '(044) 123-4567'));
 ?>
 <!DOCTYPE html>

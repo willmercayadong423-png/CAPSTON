@@ -1,4 +1,4 @@
-# HEHMS Database — Presentation Package
+# HEHMHS Database — Presentation Package
 
 Everything the panel needs for the database side of your system.
 
@@ -17,9 +17,9 @@ Everything the panel needs for the database side of your system.
 
 | Login | Password | Role |
 |---|---|---|
-| `registrar@hehms.edu.ph` | `Registrar@123` | Registrar |
-| `admin@hehms.edu.ph` | `Admin@123` | Admin |
-| `juan@hehms.edu.ph` (Student ID `2026-9001`) | `Student@123` | Student (demo) |
+| `registrar@hehmhs.edu.ph` | `Registrar@123` | Registrar |
+| `admin@hehmhs.edu.ph` | `Admin@123` | Admin |
+| `juan@hehmhs.edu.ph` (Student ID `2026-9001`) | `Student@123` | Student (demo) |
 
 > ⚠️ Change these on any real deployment.
 
@@ -49,5 +49,5 @@ Everything the panel needs for the database side of your system.
 
 ## Re-import warning
 
-`schema.sql` **drops and recreates** the `hehms` tables — only import it when
+`schema.sql` **drops and recreates** the `hehmhs` tables — only import it when
 setting up a **fresh** database (phpMyAdmin → Import), never over live data.

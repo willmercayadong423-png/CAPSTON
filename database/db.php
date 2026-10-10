@@ -16,14 +16,14 @@ require_once __DIR__ . '/config.php';
  * traces and SQL to visitors (an information-disclosure risk).
  * Local dev hosts keep visible errors for convenience; everything
  * else (the real domain) only writes to the PHP error log. */
-if (!function_exists('hehms_is_dev_host')) {
-    function hehms_is_dev_host(): bool {
+if (!function_exists('hehmhs_is_dev_host')) {
+    function hehmhs_is_dev_host(): bool {
         $host = strtolower($_SERVER['HTTP_HOST'] ?? '');
         return in_array($host, ['localhost', '127.0.0.1', '[::1]'], true)
             || preg_match('/\.(test|local)$/', $host) === 1;
     }
 }
-if (!hehms_is_dev_host()) {
+if (!hehmhs_is_dev_host()) {
     ini_set('display_errors', '0');
     ini_set('display_startup_errors', '0');
 }

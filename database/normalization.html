@@ -98,7 +98,7 @@
 <div class="page">
 
 <h1>HEHMHS Database Normalization — Diagrammed</h1>
-<p class="sub">Unnormalized Form → 1NF → 2NF → 3NF &nbsp;·&nbsp; the final diagram is the live <code>hehms</code> database</p>
+<p class="sub">Unnormalized Form → 1NF → 2NF → 3NF &nbsp;·&nbsp; the final diagram is the live <code>hehmhs</code> database</p>
 
 <div class="legend">
   <span><span class="sw" style="background:var(--pkbg)"></span> Primary key</span>
@@ -152,7 +152,7 @@ a <b>repeating group</b>. Cells hold several values; nothing has a key.</p>
     <div class="hdr">📘 STUDENT PAGE — 2026-0002</div>
     <div class="body">
       <div class="kv"><b>Name:</b> Juan Dela Cruz &nbsp; <b>Role:</b> Student</div>
-      <div class="kv"><b>Email:</b> juan@hehms.edu.ph</div>
+      <div class="kv"><b>Email:</b> juan@hehmhs.edu.ph</div>
       <div class="kv"><b>LRN:</b> 123456789012 &nbsp; <b>Grade:</b> —</div>
       <div class="kv"><b>SY attended:</b> 2023-2024 &nbsp; <b>Status:</b> active</div>
       <div class="reqgrp"><span class="lbl">REPEATING GROUP (1 : many)</span>
@@ -186,7 +186,7 @@ Shaded cells expose the price: <b>student data now repeats on every request row.
 <tr><th class="pk">RequestNo <span class="badge pk">PK</span></th><th>StudentID</th><th>Name</th><th>Email</th><th>LRN</th><th>GradeLevel</th><th>RoleName</th><th>DocName</th><th>DocReqGL</th><th>Purpose</th><th>Status</th></tr>
 <tr><td class="pk">0037</td><td>2026-0001</td><td>Willmer Cayadong</td><td>cayadong…@gmail.com</td><td>136125…</td><td>Grade 12</td><td class="dup">Student</td><td>Certificate of Enrollment</td><td class="dup2">1</td><td>Scholarship</td><td>Released</td></tr>
 <tr><td class="pk">0049</td><td>2026-0001</td><td class="dup">Willmer Cayadong</td><td class="dup">cayadong…@gmail.com</td><td class="dup">136125…</td><td class="dup">Grade 12</td><td class="dup">Student</td><td>Certificate of Good Moral</td><td class="dup2">0</td><td>College application</td><td>Pending</td></tr>
-<tr><td class="pk">0050</td><td>2026-0002</td><td>Juan Dela Cruz</td><td>juan@hehms.edu.ph</td><td>123456…</td><td>—</td><td class="dup">Student</td><td>Certificate of Good Moral</td><td class="dup2">0</td><td>Employment</td><td>Pending</td></tr>
+<tr><td class="pk">0050</td><td>2026-0002</td><td>Juan Dela Cruz</td><td>juan@hehmhs.edu.ph</td><td>123456…</td><td>—</td><td class="dup">Student</td><td>Certificate of Good Moral</td><td class="dup2">0</td><td>Employment</td><td>Pending</td></tr>
 </table>
 <p class="note">Pink = copied student data · magenta = document-type rule copied as text
 (“does this document require a Grade Level?” stored inside every request).</p>
@@ -311,7 +311,7 @@ in one place.</div>
 <div class="card">
 <h2>Final Result — the normalized schema <span class="tag">= the live database</span></h2>
 <p class="note">Solid arrows = enforced foreign keys (6). Dashed = intentional soft reference.
-This is exactly what <code>database/erd.html</code> generates from the live <code>hehms</code> database.</p>
+This is exactly what <code>database/erd.html</code> generates from the live <code>hehmhs</code> database.</p>
 
 <svg viewBox="0 0 980 650" style="width:100%;height:auto;font-family:'Segoe UI',Arial,sans-serif" xmlns="http://www.w3.org/2000/svg">
   <defs>

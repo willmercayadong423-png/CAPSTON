@@ -511,7 +511,7 @@ if (!in_array($id_ext, $allowed_ext, true)) {
                     $regs = $conn->query(
                         "SELECT u.email, u.first_name, u.last_name FROM users u
                          JOIN roles r ON r.role_id = u.role_id
-                         WHERE LOWER(r.role_name) = 'registrar' AND LOWER(u.status) != 'archived'
+                         WHERE LOWER(r.role_name) IN ('registrar', 'admin') AND LOWER(u.status) != 'archived'
                            AND u.email IS NOT NULL AND u.email <> ''"
                     );
                     while ($regs && ($rg = $regs->fetch_assoc())) {

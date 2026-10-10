@@ -1,5 +1,5 @@
 <?php
-/* ── HEHMS — Certificate preview / defaults (registrar only) ─────────
+/* ── HEHMHS — Certificate preview / defaults (registrar only) ─────────
  * GET  ?req_id=N            → streams the generated PDF inline
  *      &title=&body=&officer_name=&officer_title=&cert_date=&remarks=
  *                           → same, but with the registrar's edits applied

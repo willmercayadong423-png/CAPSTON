@@ -1,5 +1,5 @@
 <?php
-/* ── HEHMS — Admin: manage requestable document types ────────────────
+/* ── HEHMHS — Admin: manage requestable document types ────────────────
  *   GET  ?action=list             → all types + how many requests use them
  *   POST action=add               → add a new requestable document
  *   POST action=toggle            → remove (deactivate) / restore (activate)
@@ -51,7 +51,9 @@ switch ($action) {
 
     case 'add':
         // Same cleaning rule as addStud.php — names are escaped at OUTPUT.
-        $name = trim(strip_tags((string)($_POST['name'] ?? '')));
+        // db_utf8() strips invalid UTF-8 bytes (utf8mb4 would reject them
+        // with an uncaught mysqli exception since PHP 8.1).
+        $name = db_utf8(trim(strip_tags((string)($_POST['name'] ?? ''))));
         $gl   = isset($_POST['requires_grade_level']) ? 1 : 0;
 
         if ($name === '') {

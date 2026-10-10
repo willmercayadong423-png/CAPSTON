@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>3NF — Third Normal Form · HEHMHS</title>
+<style>
+  :root { --navy:#1f3864; --red:#b3261e; --amber:#b45309; --green:#4a6741; --line:#d5dbe5; }
+  * { box-sizing:border-box; margin:0; }
+  body { font-family:'Segoe UI', Arial, sans-serif; background:#20242c; display:flex;
+         justify-content:center; padding:20px; }
+  .slide { background:#fff; width:1180px; border-radius:14px; padding:34px 40px 28px; }
+  .kicker { color:var(--amber); font-weight:800; letter-spacing:2px; font-size:13px; }
+  h1 { color:var(--navy); font-size:30px; margin:2px 0 4px; }
+  .rule { background:#eef3ea; border-left:5px solid var(--green); padding:8px 14px;
+          border-radius:0 8px 8px 0; font-size:15px; margin-bottom:18px; }
+
+  .chain { background:#f7f9fc; border:1px solid var(--line); border-radius:10px;
+           padding:12px 18px; font-size:14px; margin-bottom:14px; }
+  .chain h3 { color:var(--navy); font-size:14.5px; margin-bottom:8px; }
+  .fdrow { display:flex; align-items:center; gap:8px; margin:8px 0; flex-wrap:wrap; }
+  .chip { border:2px solid var(--navy); background:#fff; border-radius:7px;
+          padding:4px 11px; font-weight:700; color:var(--navy); }
+  .chip.dep { border-color:#8a8a8a; color:#333; font-weight:500; }
+  .chip.hot { border-color:var(--red); color:var(--red); }
+  .chip.tbl { border-color:var(--green); color:var(--green); background:#e7f0e3; }
+  .arr { color:#555; font-size:16px; }
+  .verdict { font-size:12px; font-weight:800; padding:3px 12px; border-radius:11px; }
+  .verdict.no  { background:#fde8e8; color:var(--red); }
+  .verdict.yes { background:#e7f0e3; color:var(--green); }
+  .fix { margin-left:26px; }
+
+  .gridwrap { display:flex; gap:20px; align-items:flex-start; }
+  table.grid { border-collapse:collapse; font-size:13px; }
+  .grid th { background:var(--navy); color:#fff; padding:6px 11px; border:1px solid #35507e; text-align:left; }
+  .grid td { border:1px solid var(--line); padding:5px 11px; }
+  td.pk { background:#fff3cd !important; font-weight:800; }
+  td.dup { background:#fde8e8 !important; }
+  td.fk  { background:#e3edff !important; font-weight:700; }
+
+  .bottom { display:flex; gap:18px; margin-top:16px; }
+  .panel { flex:1; border-radius:10px; padding:12px 18px; font-size:14px; }
+  .panel.ok  { background:#e7f0e3; border:1px solid #bcd4b2; }
+  .panel.info{ background:#eef3fb; border:1px solid #bccbe8; }
+  .panel h3 { font-size:13.5px; margin-bottom:6px; letter-spacing:.5px; }
+  .panel.ok h3 { color:#3c5a35; } .panel.info h3 { color:var(--navy); }
+  .panel li { margin:3px 0 3px 20px; }
+  .verdict2 { margin-top:16px; display:flex; align-items:center; gap:10px; font-size:15px; flex-wrap:wrap; }
+  .verdict2 .p { background:var(--green); color:#fff; font-weight:800; border-radius:8px; padding:4px 14px; }
+  .motto { background:var(--navy); color:#fff; border-radius:8px; padding:5px 16px;
+           font-weight:700; font-size:14px; }
+</style>
+</head>
+<body>
+<div class="slide">
+  <div class="kicker">STAGE 4 OF 4 · NORMALIZATION</div>
+  <h1>3NF — Third Normal Form</h1>
+  <div class="rule"><b>Rule:</b> 2NF <b>＋ no transitive dependency</b> — a non-key attribute
+    may never depend on another non-key attribute. <i>“The key, the whole key, and nothing but the key.”</i></div>
+
+  <!-- CHAIN 1 -->
+  <div class="chain">
+    <h3>CHAIN 1 — the role name (STUDENT table)</h3>
+    <div class="fdrow">
+      <span class="chip">StudentID</span><span class="arr">──▶</span>
+      <span class="chip hot">RoleName</span><span class="arr">──▶ should be constrained to ▶</span>
+      <span class="chip dep">"Student | Registrar | Admin"</span>
+      <span class="verdict no">✗ transitive + typo risk (“Studnet”)</span>
+    </div>
+    <div class="fdrow fix">
+      <span class="arr">FIX ▶</span>
+      <span class="chip">StudentID</span><span class="arr">──▶</span>
+      <span class="chip">RoleID</span><span class="arr">──▶</span>
+      <span class="chip tbl">ROLES (role_id PK · role_name)</span>
+      <span class="verdict yes">✓ lookup table — DB now enforces valid roles</span>
+    </div>
+    <div class="gridwrap" style="margin-top:10px">
+      <table class="grid">
+        <tr><th>StudentID</th><th>RoleName <i>(before)</i></th><th>role_id <i>(after)</i></th></tr>
+        <tr><td class="pk">2026-0001</td><td class="dup">Student</td><td class="fk">1</td></tr>
+        <tr><td class="pk">2026-9000</td><td class="dup">Registrar</td><td class="fk">2</td></tr>
+        <tr><td class="pk">2026-9002</td><td class="dup">Admin</td><td class="fk">3</td></tr>
+      </table>
+      <table class="grid">
+        <tr><th colspan="2">ROLES (new lookup table)</th></tr>
+        <tr><td class="pk">1</td><td>Student</td></tr>
+        <tr><td class="pk">2</td><td>Registrar</td></tr>
+        <tr><td class="pk">3</td><td>Admin</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <!-- CHAIN 2 -->
+  <div class="chain">
+    <h3>CHAIN 2 — the document details (REQUEST table)</h3>
+    <div class="fdrow">
+      <span class="chip">RequestNo</span><span class="arr">──▶</span>
+      <span class="chip hot">DocName</span><span class="arr">──▶</span>
+      <span class="chip dep">RequiresGradeLevel · IsActive · SortOrder</span>
+      <span class="verdict no">✗ transitive — type details ride along as text</span>
+    </div>
+    <div class="fdrow fix">
+      <span class="arr">FIX ▶</span>
+      <span class="chip">RequestNo</span><span class="arr">──▶</span>
+      <span class="chip">DocTypeID</span><span class="arr">──▶</span>
+      <span class="chip tbl">DOCUMENT_TYPES (id PK · name · rules)</span>
+      <span class="verdict yes">✓ surrogate key + FK — catalog managed in one place</span>
+    </div>
+  </div>
+
+  <!-- CHAIN 3 -->
+  <div class="chain">
+    <h3>CHAIN 3 — the announcement author</h3>
+    <div class="fdrow">
+      <span class="chip">AnnouncementID</span><span class="arr">──▶</span>
+      <span class="chip hot">AuthorEmail</span><span class="arr">──▶</span>
+      <span class="chip dep">AuthorName · AuthorRole</span>
+      <span class="verdict no">✗ transitive — author data copied into each post</span>
+    </div>
+    <div class="fdrow fix">
+      <span class="arr">FIX ▶</span>
+      <span class="chip">AnnouncementID</span><span class="arr">──▶</span>
+      <span class="chip">created_by (FK → users.id)</span>
+      <span class="verdict yes">✓ author lives once in USERS</span>
+    </div>
+  </div>
+
+  <div class="bottom">
+    <div class="panel ok">
+      <h3>✅ 3NF ACHIEVED</h3>
+      <li><b>ROLES</b> lookup — role names enforced by the DB</li>
+      <li><b>DOCUMENT_TYPES</b> — catalog + rules in one table</li>
+      <li><b>ANNOUNCEMENTS.created_by</b> — single source for author</li>
+    </div>
+    <div class="panel info">
+      <h3>RESULT = THE LIVE DATABASE</h3>
+      <li>roles · users · student_profiles · document_types</li>
+      <li>document_requests · announcements · audit_logs</li>
+      <li>+ credential_resend_log · site_settings</li>
+      <li>6 enforced FK relationships — see <b>erd.html</b></li>
+    </div>
+  </div>
+
+  <div class="verdict2"><span class="p">✓ 1NF · 2NF · 3NF</span>
+    <span class="motto">Every non-key attribute depends on the key, the whole key, and nothing but the key.</span></div>
+</div>
+</body>
+</html>

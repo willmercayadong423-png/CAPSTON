@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════════════
-   HEHMS STUDENT PORTAL — simple, clean redesign (portal.css)
+   HEHMHS STUDENT PORTAL — simple, clean redesign (portal.css)
    ───────────────────────────────────────────────────────────────
    Design goals: one accent color (admin-managed theme vars with
    fallbacks), one font, card layout, generous whitespace, plain
@@ -793,7 +793,10 @@ table.tbl-x { width: 100%; border-collapse: collapse; font-size: 13.5px; }
    ═══════════════════════════════════════════════ */
 /* Small screens: sidebar collapses back to horizontal tabs under the header */
 @media (max-width: 900px) {
-    .shell { flex-direction: column; gap: 0; padding: 0 14px; }
+    .shell { flex-direction: column; gap: 0; padding: 0 14px; align-items: stretch; }
+    /* stretch (not flex-start) lets main.page keep the phone's width instead
+       of shrink-to-fitting its content — the requests table was forcing the
+       whole page ~2.4× wider than the screen on phones. */
     .sidebar {
         width: 100%; position: sticky; top: 66px; z-index: 150;
         background: var(--bg); padding-top: 10px;
@@ -822,6 +825,35 @@ table.tbl-x { width: 100%; border-collapse: collapse; font-size: 13.5px; }
     .home-hero { padding: 22px 20px; }
     .home-hero h1 { font-size: 22px; }
     .page { padding: 18px 0 50px; }
+}
+
+@media (max-width: 768px) {
+    /* Notification dropdown: anchored to its 42px bell wrapper it hangs off
+       the LEFT edge of a phone screen (right:0 of a narrow wrapper + 351px
+       width). Anchor it to the viewport's top-right instead — a compact
+       dropdown under the bell, never wider than the screen. */
+    .notif-panel {
+        position: fixed;
+        top: 70px;
+        right: 12px;
+        left: auto;
+        width: min(340px, calc(100vw - 24px));
+        max-width: none;
+    }
+    /* Keep it proportionate on short screens — list scrolls inside. */
+    .notif-panel-list { max-height: min(420px, 48vh); }
+
+    /* Touch targets: filter chips + row action buttons were only ~33px
+       tall — below the 44px mobile guideline (Apple HIG / Material). */
+    .chip,
+    .btn-edit, .btn-cancel-req, .btn-dl-cert, .btn-restore,
+    .btn-na, .btn-rejected, .btn-closed {
+        min-height: 44px;
+    }
+
+    /* iOS Safari auto-zooms into any focused input with font-size < 16px —
+       force 16px on touch-width screens so the form doesn't jump around. */
+    input, select, textarea { font-size: 16px !important; }
 }
 
 @media (max-width: 640px) {

@@ -1,5 +1,5 @@
 <?php
-/* ── HEHMS — Registrar's Monthly Request Report (PDF) ──────────────
+/* ── HEHMHS — Registrar's Monthly Request Report (PDF) ──────────────
  * Registrar + Admin. GET (read-only, no CSRF needed — same rule as
  * the CSV export). Produces a print-ready A4 summary of request
  * activity for the chosen month:

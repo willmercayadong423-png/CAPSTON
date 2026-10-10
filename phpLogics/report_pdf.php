@@ -1,6 +1,6 @@
 <?php
 /* ═══════════════════════════════════════════════════════════════════
- * HEHMS Monthly Report builder  (phpLogics/report_pdf.php)
+ * HEHMHS Monthly Report builder  (phpLogics/report_pdf.php)
  * ───────────────────────────────────────────────────────────────────
  * Single source of truth for the Monthly Request Report PDF. Two very
  * different callers share the exact same document:
@@ -223,7 +223,7 @@ function build_monthly_report_html(mysqli $conn, string $month): array
         {$relRows}
     </table>
 
-    <p class='foot'>HEHMS Credential Request &amp; Tracking System — confidential registrar report</p>
+    <p class='foot'>HEHMHS Credential Request &amp; Tracking System — confidential registrar report</p>
 </body>
 </html>";
 

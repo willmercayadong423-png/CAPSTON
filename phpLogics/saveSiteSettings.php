@@ -56,33 +56,41 @@ if ($color !== '') {
 }
 
 // ── Office hours & contact information (admin-editable) ───────────
+// db_utf8() strips invalid UTF-8 sequences — MySQL's utf8mb4 tables
+// reject them, and since PHP 8.1 mysqli throws on that (white page).
 $textSettings = [
     'office_hours'    => ['max' => 100, 'label' => 'Office hours'],
     'contact_email'   => ['max' => 150, 'label' => 'Registrar email'],
     'contact_phone'   => ['max' => 50,  'label' => 'Contact phone'],
     'contact_location'=> ['max' => 255, 'label' => 'Location'],
 ];
-foreach ($textSettings as $key => $rule) {
-    $val = trim((string)($_POST[$key] ?? ''));
-    if ($val === '') continue;                       // empty = keep current
-    if (mb_strlen($val) > $rule['max']) {
-        echo json_encode(['success' => false, 'message' => $rule['label'] . ' is too long (max ' . $rule['max'] . ' characters).']);
-        exit;
+try {
+    foreach ($textSettings as $key => $rule) {
+        $val = db_utf8(trim((string)($_POST[$key] ?? '')));
+        if ($val === '') continue;                       // empty = keep current
+        if (mb_strlen($val) > $rule['max']) {
+            echo json_encode(['success' => false, 'message' => $rule['label'] . ' is too long (max ' . $rule['max'] . ' characters).']);
+            exit;
+        }
+        if ($key === 'contact_email' && !filter_var($val, FILTER_VALIDATE_EMAIL)) {
+            echo json_encode(['success' => false, 'message' => 'Please enter a valid registrar email.']);
+            exit;
+        }
+        // NOTE: stored RAW on purpose — every page that prints these values
+        // escapes at output with htmlspecialchars(). Escaping here as well
+        // would double-escape ("&" → "&amp;amp;") on pages that escape again.
+        $stmt = $conn->prepare(
+            "INSERT INTO site_settings (setting_key, setting_value) VALUES (?, ?)
+             ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)"
+        );
+        $stmt->bind_param("ss", $key, $val);
+        $stmt->execute();
+        $stmt->close();
     }
-    if ($key === 'contact_email' && !filter_var($val, FILTER_VALIDATE_EMAIL)) {
-        echo json_encode(['success' => false, 'message' => 'Please enter a valid registrar email.']);
-        exit;
-    }
-    // NOTE: stored RAW on purpose — every page that prints these values
-    // escapes at output with htmlspecialchars(). Escaping here as well
-    // would double-escape ("&" → "&amp;amp;") on pages that escape again.
-    $stmt = $conn->prepare(
-        "INSERT INTO site_settings (setting_key, setting_value) VALUES (?, ?)
-         ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)"
-    );
-    $stmt->bind_param("ss", $key, $val);
-    $stmt->execute();
-    $stmt->close();
+} catch (Throwable $e) {
+    error_log('saveSiteSettings text update failed: ' . $e->getMessage());
+    echo json_encode(['success' => false, 'message' => 'Could not save the information. Please check for unusual characters and try again.']);
+    exit;
 }
 
 // ── Logo upload (optional) ────────────────────────────────────────

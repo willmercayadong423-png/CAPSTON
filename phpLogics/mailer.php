@@ -1,6 +1,6 @@
 <?php
 /* ═══════════════════════════════════════════════════════════════════
- * HEHMS Mail API  (phpLogics/mailer.php)
+ * HEHMHS Mail API  (phpLogics/mailer.php)
  * ───────────────────────────────────────────────────────────────────
  * Single reusable entry point for every email the system sends.
  * SMTP credentials come from database/config.php (SMTP_* constants),
@@ -25,6 +25,12 @@ require_once __DIR__ . '/../vendor/autoload.php';
 /* ── Low-level: build a pre-configured SMTP mailer ───────────────── */
 function mailer_init(string $subject, string $toEmail, string $toName): PHPMailer\PHPMailer\PHPMailer
 {
+    // Global kill-switch (config.php) — e.g. while running the e2e suites
+    // so Gmail's daily sending quota isn't burned by test traffic.
+    if (defined('MAIL_ENABLED') && !MAIL_ENABLED) {
+        throw new RuntimeException('Mail sending is disabled (MAIL_ENABLED=false)');
+    }
+
     $mail = new PHPMailer\PHPMailer\PHPMailer(true);
     $mail->isSMTP();
     $mail->Host       = SMTP_HOST;
@@ -33,6 +39,7 @@ function mailer_init(string $subject, string $toEmail, string $toName): PHPMaile
     $mail->Password   = SMTP_PASS;
     $mail->SMTPSecure = PHPMailer\PHPMailer\PHPMailer::ENCRYPTION_STARTTLS;
     $mail->Port       = SMTP_PORT;
+    $mail->Timeout    = 15;   // seconds — bound the worst-case stall when SMTP is slow/down
     $mail->CharSet    = 'UTF-8';
     $mail->Encoding   = 'base64';
     $mail->setFrom(SMTP_FROM, SMTP_FROM_NAME);
@@ -42,7 +49,7 @@ function mailer_init(string $subject, string $toEmail, string $toName): PHPMaile
     return $mail;
 }
 
-/* ── Shared branded HTML wrapper (matches all HEHMS emails) ──────── */
+/* ── Shared branded HTML wrapper (matches all HEHMHS emails) ──────── */
 function mailer_template(string $heading, string $bodyHtml): string
 {
     return "
@@ -52,7 +59,7 @@ function mailer_template(string $heading, string $bodyHtml): string
             </div>
             <div style='padding: 28px;'>{$bodyHtml}</div>
             <div style='background: #f5f7fa; padding: 14px; text-align: center;'>
-                <p style='color: #aaa; font-size: 12px; margin: 0;'>HEHMS Student Records System &mdash; Confidential</p>
+                <p style='color: #aaa; font-size: 12px; margin: 0;'>HEHMHS Student Records System &mdash; Confidential</p>
             </div>
         </div>";
 }
@@ -86,17 +93,17 @@ function send_status_email(string $toEmail, string $toName, string $reqNo, strin
 {
     switch ($status) {
         case 'Pending':   // submission confirmation — "we received your request"
-            $subject = 'Request received — HEHMS';
+            $subject = 'Request received — HEHMHS';
             $body    = "<p style='color:#555;'>Your request has been "
                      . "<strong style='color:#166534;'>received</strong> and is now in the Registrar's "
                      . "<strong>Pending</strong> queue.</p>"
                      . "<p style='color:#555;'>You will receive another email as soon as your request is "
-                     . "accepted for processing. You can also track its status anytime in your HEHMS "
+                     . "accepted for processing. You can also track its status anytime in your HEHMHS "
                      . "account under <strong>My Requests</strong>.</p>";
             break;
 
         case 'Rejected':  // registrar rejected the request — reason included
-            $subject = 'Your request was rejected — HEHMS';
+            $subject = 'Your request was rejected — HEHMHS';
             $reasonHtml = $reason
                 ? "<div style='background:#fdf3f3;border:1px solid #e3c8c8;border-radius:8px;padding:12px 14px;margin:14px 0;'>"
                  . "<p style='margin:0;font-size:12px;color:#9c2b2b;font-weight:700;'>&#9888; REASON FOR REJECTION</p>"
@@ -106,11 +113,11 @@ function send_status_email(string $toEmail, string $toName, string $reqNo, strin
                      . "<strong style='color:#b33;'>rejected</strong> by the Registrar's Office.</p>"
                      . $reasonHtml
                      . "<p style='color:#555;'>If you can complete the missing requirements, you may submit "
-                     . "a new request through your HEHMS account.</p>";
+                     . "a new request through your HEHMHS account.</p>";
             break;
 
         case 'Processing':
-            $subject = 'Your request has been accepted — HEHMS';
+            $subject = 'Your request has been accepted — HEHMHS';
             $body    = "<p style='color:#555;'>Good news! Your request has been "
                      . "<strong style='color:#166534;'>accepted</strong> by the Registrar's Office "
                      . "and is now <strong>being processed</strong>.</p>"
@@ -119,7 +126,7 @@ function send_status_email(string $toEmail, string $toName, string $reqNo, strin
             break;
 
         case 'Released':
-            $subject = 'Your document has been released — HEHMS';
+            $subject = 'Your document has been released — HEHMHS';
             $body    = "<p style='color:#555;'>Your requested document has been prepared and "
                      . "<strong style='color:#166534;'>released</strong> — it is now ready for claiming.</p>"
                      . "<p style='color:#555;'>Please claim it at the Registrar's Office during office hours "
@@ -129,7 +136,7 @@ function send_status_email(string $toEmail, string $toName, string $reqNo, strin
             break;
 
         case 'Ready for Pickup': // legacy status — kept for old rows only
-            $subject = 'Your document is ready for pickup — HEHMS';
+            $subject = 'Your document is ready for pickup — HEHMHS';
             $body    = "<p style='color:#555;'>Good news! Your requested document is now "
                      . "<strong style='color:#166534;'>Ready for Pickup</strong>.</p>"
                      . "<p style='color:#555;'>Please claim it at the Registrar's Office during office hours "
@@ -137,7 +144,7 @@ function send_status_email(string $toEmail, string $toName, string $reqNo, strin
             break;
 
         default:
-            $subject = 'Request update — HEHMS';
+            $subject = 'Request update — HEHMHS';
             $body    = "<p style='color:#555;'>The status of your request has been updated to "
                      . "<strong>" . htmlspecialchars($status) . "</strong>.</p>";
     }
@@ -146,8 +153,8 @@ function send_status_email(string $toEmail, string $toName, string $reqNo, strin
 
     try {
         $mail = mailer_init($subject, $toEmail, $toName);
-        $mail->Body    = mailer_template('HEHMS Request Update', $greeting . mailer_info_table($reqNo, $docType, $status) . $body);
-        $mail->AltBody = "HEHMS Request Update — {$reqNo} ({$docType}) is now: {$status}.";
+        $mail->Body    = mailer_template('HEHMHS Request Update', $greeting . mailer_info_table($reqNo, $docType, $status) . $body);
+        $mail->AltBody = "HEHMHS Request Update — {$reqNo} ({$docType}) is now: {$status}.";
         $mail->send();
         return ['ok' => true, 'error' => null];
     } catch (Throwable $e) {
@@ -187,7 +194,7 @@ function send_overdue_digest(mysqli $conn, array $overdue, int $thresholdDays): 
             . "</tr>";
     }
 
-    $subject = "\u{26A0} {$count} document request(s) waiting over {$thresholdDays} days \u{2014} HEHMS";
+    $subject = "\u{26A0} {$count} document request(s) waiting over {$thresholdDays} days \u{2014} HEHMHS";
 
     $regs = $conn->query(
         "SELECT u.email, CONCAT(u.first_name,' ',u.last_name) AS name FROM users u
@@ -240,8 +247,8 @@ function send_registrar_request_email(
 ): array {
     $restored  = ($action === 'restored');
     $subject   = $restored
-        ? "Request restored to Pending ({$reqNo}) — HEHMS"
-        : "New document request ({$reqNo}) — HEHMS";
+        ? "Request restored to Pending ({$reqNo}) — HEHMHS"
+        : "New document request ({$reqNo}) — HEHMHS";
 
     $studentName = htmlspecialchars($studentName);
     $docTypeHtml = htmlspecialchars($docType);
@@ -265,7 +272,7 @@ function send_registrar_request_email(
 
     try {
         $mail = mailer_init($subject, $regEmail, $regName);
-        $mail->Body    = mailer_template('HEHMS Registrar Notice', $greeting . $body);
+        $mail->Body    = mailer_template('HEHMHS Registrar Notice', $greeting . $body);
         $mail->AltBody = "{$studentName} {$action} request {$reqNo} ({$docType}). Log in to the Registrar Dashboard.";
         $mail->send();
         return ['ok' => true, 'error' => null];
@@ -286,25 +293,25 @@ function send_certificate_email(string $toEmail, string $toName, string $reqNo, 
         return ['ok' => false, 'error' => "Certificate file missing: {$certWebPath}"];
     }
 
-    // Friendly attachment name: HEHMS_Certificate_of_Grades_REQ-0005.pdf
+    // Friendly attachment name: HEHMHS_Certificate_of_Grades_REQ-0005.pdf
     $safeDoc  = preg_replace('/[^A-Za-z0-9]+/', '_', $docType);
     $safeDoc  = trim($safeDoc, '_');
     $ext      = strtolower(pathinfo($fsPath, PATHINFO_EXTENSION));
-    $attName  = "HEHMS_{$safeDoc}_{$reqNo}.{$ext}";
+    $attName  = "HEHMHS_{$safeDoc}_{$reqNo}.{$ext}";
 
-    $subject = "Your e-Certificate ({$reqNo}) — HEHMS";
+    $subject = "Your e-Certificate ({$reqNo}) — HEHMHS";
 
     $greeting = "<p style='color:#333;'>Hello, <strong>" . htmlspecialchars($toName) . "</strong>!</p>";
     $body     = "<p style='color:#555;'>Your requested document has been released. Please find your "
               . "<strong style='color:#166534;'>e-certificate attached</strong> to this email — a copy is also "
-              . "saved in your HEHMS account under <strong>My Requests &rarr; History</strong>.</p>"
+              . "saved in your HEHMHS account under <strong>My Requests &rarr; History</strong>.</p>"
               . "<p style='color:#555;'>If you also need the printed/original copy, please claim it at the "
               . "Registrar's Office during office hours (Mon&ndash;Fri, 8:00 AM &ndash; 4:00 PM) and bring a "
               . "<strong>valid ID</strong>.</p>";
 
     try {
         $mail = mailer_init($subject, $toEmail, $toName);
-        $mail->Body    = mailer_template('HEHMS E-Certificate Delivery', $greeting . mailer_info_table($reqNo, $docType, 'Released') . $body);
+        $mail->Body    = mailer_template('HEHMHS E-Certificate Delivery', $greeting . mailer_info_table($reqNo, $docType, 'Released') . $body);
         $mail->AltBody = "Your document ({$docType}, {$reqNo}) has been released. The e-certificate is attached to this email.";
         $mail->addAttachment($fsPath, $attName);
         $mail->send();

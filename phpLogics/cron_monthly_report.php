@@ -1,20 +1,20 @@
 <?php
 /* ═══════════════════════════════════════════════════════════════════
- * HEHMS Month-End Report — CLI runner  (phpLogics/cron_monthly_report.php)
+ * HEHMHS Month-End Report — CLI runner  (phpLogics/cron_monthly_report.php)
  * ───────────────────────────────────────────────────────────────────
  * Command-line-only entry point for the automatic monthly report
  * e-mail (see monthly_report_email.php). Runs OUTSIDE the web session
  * — no login, no CSRF — so it must NEVER be reachable through a
  * browser (guarded below).
  *
- * HOW TO SCHEDULE (Windows / XAMPP — recommended: daily at 00:30):
+ * HOW TO SCHEDULE (Windows / Laragon — recommended: daily at 00:30):
  *   Option A — Task Scheduler GUI:
- *     Program:   C:\xampp\php\php.exe
- *     Arguments: "C:\xampp\htdocs\NEW UPCAP\phpLogics\cron_monthly_report.php"
+ *     Program:   C:\laragon\bin\php\php-8.3.33-Win32-vs16-x64\php.exe
+ *     Arguments: "C:\laragon\www\NEW UPCAP\phpLogics\cron_monthly_report.php"
  *     Trigger:   Daily, 00:30
  *   Option B — one-liner (Admin Command Prompt):
- *     schtasks /create /tn "HEHMS Monthly Report" /sc daily /st 00:30 ^
- *       /tr "C:\xampp\php\php.exe \"C:\xampp\htdocs\NEW UPCAP\phpLogics\cron_monthly_report.php\""
+ *     schtasks /create /tn "HEHMHS Monthly Report" /sc daily /st 00:30 ^
+ *       /tr "C:\laragon\bin\php\php-8.3.33-Win32-vs16-x64\php.exe \"C:\laragon\www\NEW UPCAP\phpLogics\cron_monthly_report.php\""
  *
  * Linux deployment equivalent (crontab):
  *   30 0 * * * /usr/bin/php /var/www/hehms/phpLogics/cron_monthly_report.php
@@ -43,7 +43,7 @@ require __DIR__ . '/monthly_report_email.php';     // the sender
 $target = date('Y-m', strtotime('first day of previous month'));
 $lastSent = site_setting('monthly_report_last_sent', '(never)');
 
-echo "HEHMS month-end report runner " . date('Y-m-d H:i:s') . "\n";
+echo "HEHMHS month-end report runner " . date('Y-m-d H:i:s') . "\n";
 echo "Previous month: {$target} · last report e-mailed: {$lastSent}\n";
 
 $arg = $argv[1] ?? '';

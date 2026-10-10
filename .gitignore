@@ -9,5 +9,6 @@ uploads/
 # Dev tooling
 vendor/
 composer.phar
+cert_preview_sample.pdf
 .idea/
 .vscode/

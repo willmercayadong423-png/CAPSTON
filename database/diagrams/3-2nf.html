@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>2NF — Second Normal Form · HEHMHS</title>
+<style>
+  :root { --navy:#1f3864; --red:#b3261e; --amber:#b45309; --green:#4a6741; --line:#d5dbe5; }
+  * { box-sizing:border-box; margin:0; }
+  body { font-family:'Segoe UI', Arial, sans-serif; background:#20242c; display:flex;
+         justify-content:center; padding:20px; }
+  .slide { background:#fff; width:1180px; border-radius:14px; padding:34px 40px 28px; }
+  .kicker { color:var(--amber); font-weight:800; letter-spacing:2px; font-size:13px; }
+  h1 { color:var(--navy); font-size:30px; margin:2px 0 4px; }
+  .rule { background:#eef3ea; border-left:5px solid var(--green); padding:8px 14px;
+          border-radius:0 8px 8px 0; font-size:15px; margin-bottom:18px; }
+
+  .fdmap { background:#f7f9fc; border:1px solid var(--line); border-radius:10px;
+           padding:14px 18px; font-size:14.5px; margin-bottom:20px; }
+  .fdrow { display:flex; align-items:center; gap:9px; margin:9px 0; flex-wrap:wrap; }
+  .chip { border:2px solid var(--navy); background:#fff; border-radius:7px;
+          padding:4px 11px; font-weight:700; color:var(--navy); }
+  .chip.dep { border-color:#8a8a8a; color:#333; font-weight:500; }
+  .arr { color:#555; font-size:17px; }
+  .verdict { font-size:12.5px; font-weight:800; padding:3px 12px; border-radius:11px; }
+  .verdict.no  { background:#fde8e8; color:var(--red); }
+  .verdict.yes { background:#e7f0e3; color:var(--green); }
+  .goto { font-size:12.5px; color:#666; font-weight:700; }
+
+  .flowwrap { display:flex; gap:16px; align-items:stretch; margin:14px 0 6px; }
+  .tblbox { border:2px solid var(--navy); border-radius:10px; overflow:hidden; font-size:13.5px;
+            background:#fff; flex:1; }
+  .tblbox .th { background:var(--navy); color:#fff; font-weight:800; padding:8px 12px;
+                text-align:center; font-size:14.5px; }
+  .tblbox .tr { padding:6px 12px; border-top:1px solid #e8edf5; display:flex; justify-content:space-between; gap:8px; }
+  .tblbox .tr:first-of-type { border-top:none; }
+  .tblbox .tr .pk { color:var(--amber); font-weight:800; }
+  .tblbox .tr .fk { color:#3b6ea5; font-weight:800; }
+  .flowarrow { align-self:center; color:var(--navy); font-size:26px; font-weight:800; }
+  .from1 { outline:3px solid var(--amber); } .from2 { outline:3px solid #3b6ea5; }
+  .from3 { outline:3px solid var(--green); }
+  .provenance { font-size:13px; color:#444; margin:10px 0 16px; }
+  .pv { display:inline-block; width:13px; height:13px; border-radius:3px; margin:0 5px 0 14px;
+        vertical-align:-2px; border:1px solid #999; }
+
+  .bottom { display:flex; gap:18px; }
+  .panel { flex:1; border-radius:10px; padding:12px 18px; font-size:14px; }
+  .panel.ok  { background:#e7f0e3; border:1px solid #bcd4b2; }
+  .panel.bad { background:#fdeeee; border:1px solid #f2c4c4; }
+  .panel h3 { font-size:13.5px; margin-bottom:6px; letter-spacing:.5px; }
+  .panel.ok h3 { color:#3c5a35; } .panel.bad h3 { color:var(--red); }
+  .panel li { margin:3px 0 3px 20px; }
+  .verdict2 { margin-top:16px; display:flex; align-items:center; gap:10px; font-size:15px; }
+  .verdict2 .p { background:var(--green); color:#fff; font-weight:800; border-radius:8px; padding:4px 14px; }
+  .verdict2 .n { background:var(--red); color:#fff; font-weight:800; border-radius:8px; padding:4px 14px; }
+</style>
+</head>
+<body>
+<div class="slide">
+  <div class="kicker">STAGE 3 OF 4 · NORMALIZATION</div>
+  <h1>2NF — Second Normal Form</h1>
+  <div class="rule"><b>Rule:</b> 1NF <b>＋ no partial dependency</b> — no attribute may depend
+    on only <b>part of a composite key</b>. Key the 1NF table by <b>( StudentID ＋ RequestNo )</b> and test every attribute.</div>
+
+  <div class="fdmap">
+    <div class="fdrow">
+      <span class="chip">StudentID</span><span class="arr">＋</span><span class="chip">RequestNo</span>
+      <span class="arr">══ whole key ══▶</span>
+      <span class="chip dep">Purpose</span><span class="chip dep">Status</span>
+      <span class="chip dep">Dates</span><span class="chip dep">Files</span>
+      <span class="verdict yes">✓ depends on the FULL key</span>
+    </div>
+    <div class="fdrow">
+      <span class="chip">StudentID</span><span class="arr">── alone ──▶</span>
+      <span class="chip dep">Name</span><span class="chip dep">Email</span><span class="chip dep">LRN</span>
+      <span class="chip dep">GradeLevel</span><span class="chip dep">RoleName</span>
+      <span class="verdict no">✗ PARTIAL — pull out</span><span class="goto">→ STUDENT</span>
+    </div>
+    <div class="fdrow">
+      <span class="chip">DocName</span><span class="arr">── alone ──▶</span>
+      <span class="chip dep">RequiresGradeLevel</span>
+      <span class="verdict no">✗ PARTIAL — pull out</span><span class="goto">→ DOCUMENT_TYPE</span>
+    </div>
+  </div>
+
+  <div class="flowwrap">
+    <div class="tblbox from1">
+      <div class="th">STUDENT <span style="font-weight:400;font-size:11px">1 row per student</span></div>
+      <div class="tr"><b>StudentID</b><span class="pk">PK</span></div>
+      <div class="tr"><span>Name</span></div>
+      <div class="tr"><span>Email · Contact</span></div>
+      <div class="tr"><span>LRN</span></div>
+      <div class="tr"><span>GradeLevel · SY</span></div>
+      <div class="tr"><span>RoleName · Status · Photo</span></div>
+    </div>
+    <div class="flowarrow">◀─</div>
+    <div class="tblbox from2">
+      <div class="th">DOCUMENT_TYPE <span style="font-weight:400;font-size:11px">1 row per type</span></div>
+      <div class="tr"><b>DocName</b><span class="pk">PK</span></div>
+      <div class="tr"><span>RequiresGradeLevel</span></div>
+    </div>
+    <div class="flowarrow">◀─</div>
+    <div class="tblbox from3">
+      <div class="th">REQUEST <span style="font-weight:400;font-size:11px">1 row per request</span></div>
+      <div class="tr"><b>RequestNo</b><span class="pk">PK</span></div>
+      <div class="tr"><span>StudentID</span><span class="fk">FK</span></div>
+      <div class="tr"><span>DocName</span><span class="fk">FK</span></div>
+      <div class="tr"><span>Purpose · Status</span></div>
+      <div class="tr"><span>Dates</span></div>
+      <div class="tr"><span>IDPhoto · ECertificate</span></div>
+    </div>
+  </div>
+  <div class="provenance">Where each column group went:
+    <span class="pv" style="background:#fff3cd"></span>student-only facts
+    <span class="pv" style="background:#e3edff"></span>type-rule facts
+    <span class="pv" style="background:#e7f0e3"></span>true request facts</div>
+
+  <div class="bottom">
+    <div class="panel ok">
+      <h3>✅ 2NF ACHIEVED</h3>
+      <li>Student data stored <b>once</b> — no more copied rows</li>
+      <li>A student with <b>zero requests</b> can now exist</li>
+      <li>“Requires Grade Level?” rule lives in <b>one place</b></li>
+    </div>
+    <div class="panel bad">
+      <h3>STILL BROKEN — TRANSITIVE DEPENDENCIES</h3>
+      <li><code>StudentID → RoleName</code> — free text, no integrity (“Studnet”)</li>
+      <li><code>RequestNo → DocName → RequiresGL</code> — details ride along as text</li>
+      <li><code>AnnouncementID → AuthorEmail → AuthorName</code></li>
+    </div>
+  </div>
+
+  <div class="verdict2"><span class="p">✓ 1NF · 2NF</span> <span class="n">✗ NOT YET 3NF</span>
+    Next → remove non-key → non-key chains.</div>
+</div>
+</body>
+</html>

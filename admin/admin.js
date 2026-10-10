@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════
-   HEHMS — Admin Dashboard JS  (admin.js)
+   HEHMHS — Admin Dashboard JS  (admin.js)
    One page: views, announcements, accounts, settings,
    own profile.
    ═══════════════════════════════════════════════════ */
@@ -331,6 +331,10 @@ function saveAccount() {
         showToast('Please enter your current password to set a new one.', 'error');
         return;
     }
+    if (password && password.length < 8) {
+        showToast('New password must be at least 8 characters.', 'error');
+        return;
+    }
 
     var btn = document.getElementById('btn-save-account');
     btn.disabled = true;
@@ -370,6 +374,14 @@ var editingStudentId  = null;
 var originalEmail     = null;
 var currentRoleFilter = '';
 
+/* Pagination — 10 accounts per page, no matter how many exist.
+   (Rendering 1,000+ <tr> rows at once froze the table; the pager keeps
+   the DOM small and the page fast.) */
+var PAGE_SIZE        = 10;
+var currentPage      = 1;
+var allStudents      = [];   // full list from getStud.php
+var filteredStudents = [];   // after view + role + search filters
+
 function escapeHtml(str) {
     return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
@@ -396,86 +408,76 @@ function loadStudents() {
 }
 
 function renderStudents(students) {
-    var tbody = document.getElementById('records-tbody');
-    tbody.innerHTML = '';
-    var total = 0, registrars = 0, archived = 0;
-
-    students.forEach(function (s) {
-        var fullName   = escapeHtml((s.first_name + ' ' + s.last_name).trim());
-        var status     = (s.status || '').toLowerCase().trim();
-        var role       = (s.role   || '').toLowerCase().trim();
-        var isArchived = (status === 'archived' || status === 'archive');
-
-        if (isArchived) archived++;
-        else {
-            if (role === 'student') total++;
-            if (role === 'registrar' || role === 'admin') registrars++;
-        }
-
-        var contact = String(s.contact_number || s.contact || '');
-        var row     = document.createElement('tr');
-        row.className            = isArchived ? 'view-alumni' : 'view-enrolled';
-        row.dataset.profilePhoto = s.profile_photo || '';
-        row.dataset.id           = s.student_id;
-        // ⚠ Store RAW values here — dataset assignment is attribute-safe by
-        // itself. Storing pre-escaped values made the edit form write back
-        // "O&#039;Brien" into the DB on save. Escape only when rendering HTML
-        // (see fullName / roleBadge / the row.innerHTML below).
-        row.dataset.fullname     = (s.first_name + ' ' + s.last_name).trim();
-        row.dataset.role         = s.role;
-        row.dataset.email        = s.email;
-        row.dataset.contact      = contact;
-        row.dataset.lrn          = s.lrn                        || '';
-
-        row.dataset.searchIndex = [
-            s.student_id, row.dataset.fullname, s.role, s.email, contact,
-            s.lrn || ''
-        ].join(' ').toLowerCase();
-
-        // ── Role badge — clearly identifies Student / Registrar / Admin ──
-        var roleLabel = { student: 'Student', registrar: 'Registrar', admin: 'Admin' }[role]
-                        || escapeHtml(s.role || '—');
-        var roleBadge = '<span class="role-badge role-' + (role || 'other') + '">' + roleLabel + '</span>';
-
-        // ── Status badge (Active / Archived) ──
-        var statusBadge = isArchived
-            ? '<span class="acc-status archived">Archived</span>'
-            : '<span class="acc-status active">Active</span>';
-
-        // ── "View Documents" only makes sense for student accounts —
-        //    registrars and admins never place requests.
-        var viewDocsItem = (role === 'student')
-            ? '<a href="#" class="view-docs">' + svgIcon('file-text', 13) + ' View Documents</a>'
-            : '';
-
-        row.innerHTML =
-            '<td><strong>' + escapeHtml(s.student_id) + '</strong></td>' +
-            '<td><div class="rec-name-cell">' + avatarHtml(s) + '<span>' + fullName + '</span></div></td>' +
-            '<td>' + roleBadge + '</td>' +
-            '<td><small>' + escapeHtml(s.email) + '</small></td>' +
-            '<td>' + escapeHtml(contact) + '</td>' +
-            '<td>' + statusBadge + '</td>' +
-            '<td><div class="dropdown">' +
-                '<button class="dots-btn">⋮</button>' +
-                '<div class="dropdown-content">' +
-                    '<a href="#" class="edit">' + svgIcon('pencil', 13) + ' Edit Record</a>' +
-                    viewDocsItem +
-                    (isArchived
-                        ? '<a href="#" class="restore">' + svgIcon('restore', 13) + ' Unarchive</a>'
-                        : '<a href="#" class="delete">' + svgIcon('package', 13) + ' Archive</a>') +
-                '</div></div></td>';
-
-        tbody.appendChild(row);
-    });
-
+    allStudents = students;
+    currentPage = 1;
     applyFilters();
+}
+
+/* Build ONE table row for an account */
+function buildStudentRow(s) {
+    var fullName   = escapeHtml((s.first_name + ' ' + s.last_name).trim());
+    var status     = (s.status || '').toLowerCase().trim();
+    var role       = (s.role   || '').toLowerCase().trim();
+    var isArchived = (status === 'archived' || status === 'archive');
+    var contact = String(s.contact_number || s.contact || '');
+
+    var row = document.createElement('tr');
+    row.className            = isArchived ? 'view-alumni' : 'view-enrolled';
+    row.dataset.profilePhoto = s.profile_photo || '';
+    row.dataset.uid           = s.id;
+    row.dataset.id           = s.student_id || ('uid:' + s.id);
+    // Store RAW values here (dataset assignment is attribute-safe). Escape
+    // only when rendering HTML — pre-escaped values got written back into
+    // the DB as "O&#039;Brien" on save.
+    row.dataset.fullname     = (s.first_name + ' ' + s.last_name).trim();
+    row.dataset.role         = s.role;
+    row.dataset.email        = s.email;
+    row.dataset.contact      = contact;
+    row.dataset.lrn          = s.lrn                        || '';
+
+    // Role badge — clearly identifies Student / Registrar / Admin
+    var roleLabel = { student: 'Student', registrar: 'Registrar', admin: 'Admin' }[role]
+                    || escapeHtml(s.role || '—');
+    var roleBadge = '<span class="role-badge role-' + (role || 'other') + '">' + roleLabel + '</span>';
+
+    // Status badge (Active / Archived)
+    var statusBadge = isArchived
+        ? '<span class="acc-status archived">Archived</span>'
+        : '<span class="acc-status active">Active</span>';
+
+    // Re-send login credentials (welcome email never arrived → new temp
+    // password is issued and emailed)
+    var resendCredItem =
+        '<a href="#" class="resend-cred">' + svgIcon('mail', 13) + ' Resend Credentials</a>';
+
+    row.innerHTML =
+        '<td><strong>' + escapeHtml(s.student_id || '—') + '</strong></td>' +
+        '<td><div class="rec-name-cell">' + avatarHtml(s) + '<span>' + fullName + '</span></div></td>' +
+        '<td>' + roleBadge + '</td>' +
+        '<td><small>' + escapeHtml(s.email) + '</small></td>' +
+        '<td>' + escapeHtml(contact) + '</td>' +
+        '<td>' + statusBadge + '</td>' +
+        '<td><div class="dropdown">' +
+            '<button class="dots-btn">⋮</button>' +
+            '<div class="dropdown-content">' +
+                '<a href="#" class="edit">' + svgIcon('pencil', 13) + ' Edit Record</a>' +
+                '<a href="#" class="view-account">' + svgIcon('user', 13) + ' View Account</a>' +
+                resendCredItem +
+                (isArchived
+                    ? '<a href="#" class="restore">' + svgIcon('restore', 13) + ' Unarchive</a>'
+                    : '<a href="#" class="delete">' + svgIcon('package', 13) + ' Archive</a>') +
+            '</div></div></td>';
+    return row;
 }
 
 function avatarHtml(s) {
     var name     = escapeHtml((s.first_name || '') + ' ' + (s.last_name || ''));
     var initials = escapeHtml(((s.first_name || '').charAt(0) + (s.last_name || '').charAt(0)).toUpperCase());
     if (s.profile_photo) {
-        return '<img src="../' + escapeHtml(s.profile_photo) + '" alt="' + name +
+        // Photos are served through the authenticated endpoint — never a
+        // direct /uploads/ URL (the folder is blocked from web access).
+        var src = '../phpLogics/download_profile.php?user_id=' + encodeURIComponent(s.id);
+        return '<img src="' + src + '" alt="' + name +
                '" class="rec-avatar" onerror="this.outerHTML=\'<span class=&quot;rec-avatar-initials&quot;>' + initials + '</span>\'">';
     }
     return '<span class="rec-avatar-initials">' + initials + '</span>';
@@ -490,34 +492,83 @@ function switchRecView(view) {
 
 function applyFilters() {
     var search = document.getElementById('student-search').value.toLowerCase().trim();
-    var hasResults = false;
 
-    document.querySelectorAll('#records-tbody tr:not(.no-results-row)').forEach(function (row) {
-        if (!row.classList.contains('view-' + currentView)) {
-            row.style.display = 'none';
-            return;
-        }
-        var roleMatch = !currentRoleFilter ||
-            (row.dataset.role || '').toLowerCase() === currentRoleFilter.toLowerCase();
-        var match = roleMatch && (!search || (row.dataset.searchIndex || '').includes(search));
-        row.style.display = match ? '' : 'none';
-        if (match) hasResults = true;
+    // 1 — filter the DATA (not the DOM: only the current page is rendered)
+    filteredStudents = allStudents.filter(function (s) {
+        var status = (s.status || '').toLowerCase().trim();
+        var role   = (s.role   || '').toLowerCase().trim();
+        var view   = (status === 'archived' || status === 'archive') ? 'alumni' : 'enrolled';
+        if (view !== currentView) return false;
+        if (currentRoleFilter && role !== currentRoleFilter.toLowerCase()) return false;
+        var haystack = [
+            s.student_id || '', (s.first_name + ' ' + s.last_name).trim(),
+            s.role || '', s.email || '', String(s.contact_number || s.contact || ''), s.lrn || ''
+        ].join(' ').toLowerCase();
+        return !search || haystack.indexOf(search) !== -1;
     });
 
-    var existing = document.querySelector('#records-tbody .no-results-row');
-    if (!hasResults && search) {
-        if (!existing) {
-            var noRow = document.createElement('tr');
-            noRow.className = 'no-results-row';
-            noRow.innerHTML = '<td colspan="7" style="text-align:center;padding:2rem;color:#888;">No records found for "<strong>' + escapeHtml(search) + '</strong>"</td>';
-            document.getElementById('records-tbody').appendChild(noRow);
-        } else {
-            existing.style.display = '';
-            existing.querySelector('td').innerHTML = 'No records found for "<strong>' + escapeHtml(search) + '</strong>"';
-        }
-    } else if (existing) {
-        existing.style.display = 'none';
+    // 2 — clamp the page and render just this page's slice
+    var totalPages = Math.max(1, Math.ceil(filteredStudents.length / PAGE_SIZE));
+    if (currentPage > totalPages) currentPage = totalPages;
+    renderAccountsPage();
+}
+
+function renderAccountsPage() {
+    var tbody = document.getElementById('records-tbody');
+    tbody.innerHTML = '';
+
+    if (!filteredStudents.length) {
+        var search = document.getElementById('student-search').value.toLowerCase().trim();
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:2rem;color:#888;">' +
+            (search ? 'No records found for "<strong>' + escapeHtml(search) + '</strong>"'
+                    : (currentView === 'alumni' ? 'No archived accounts.' : 'No accounts yet.')) +
+            '</td></tr>';
+        renderPager();
+        return;
     }
+
+    var start = (currentPage - 1) * PAGE_SIZE;
+    var slice = filteredStudents.slice(start, start + PAGE_SIZE);
+    slice.forEach(function (s) { tbody.appendChild(buildStudentRow(s)); });
+
+    renderPager();
+}
+
+function renderPager() {
+    var pager = document.getElementById('accounts-pager');
+    if (!pager) return;
+    var total = filteredStudents.length;
+    var totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+
+    if (totalPages <= 1) {
+        pager.innerHTML = total
+            ? '<span class="ap-info">Showing all ' + total + ' account' + (total === 1 ? '' : 's') + '</span>'
+            : '';
+        return;
+    }
+
+    var start = (currentPage - 1) * PAGE_SIZE + 1;
+    var end = Math.min(currentPage * PAGE_SIZE, total);
+
+    // Page numbers with ellipsis for long lists: 1 … 4 5 6 … 42
+    var nums = [];
+    function pushNum(p) { if (p > 0 && nums.indexOf(p) === -1) nums.push(p); }
+    pushNum(1);
+    for (var p = currentPage - 1; p <= currentPage + 1; p++) if (p > 1 && p < totalPages) pushNum(p);
+    pushNum(totalPages);
+    nums.sort(function (a, b) { return a - b; });
+
+    var html = '<span class="ap-info">Showing <strong>' + start + '–' + end + '</strong> of ' + total + '</span>';
+    html += '<button type="button" class="ap-btn" data-page="' + (currentPage - 1) + '"' + (currentPage === 1 ? ' disabled' : '') + '>&laquo; Prev</button>';
+    var last = 0;
+    nums.forEach(function (n) {
+        if (n - last > 1) html += '<span class="ap-gap">…</span>';
+        html += '<button type="button" class="ap-btn' + (n === currentPage ? ' active' : '') + '" data-page="' + n + '">' + n + '</button>';
+        last = n;
+    });
+    html += '<button type="button" class="ap-btn" data-page="' + (currentPage + 1) + '"' + (currentPage === totalPages ? ' disabled' : '') + '>Next &raquo;</button>';
+
+    pager.innerHTML = html;
 }
 
 /* ── Row action dropdown ── */
@@ -594,12 +645,34 @@ document.addEventListener('click', function (e) {
         return;
     }
 
-    var viewDocsLink = e.target.closest('a.view-docs');
-    if (viewDocsLink) {
+    var viewAccountLink = e.target.closest('a.view-account');
+    if (viewAccountLink) {
         e.preventDefault();
-        var row = _activeDropdown ? _activeDropdown.menu._row : viewDocsLink.closest('tr');
+        var row = _activeDropdown ? _activeDropdown.menu._row : viewAccountLink.closest('tr');
         closeAllDropdowns();
-        if (row) openDocsModal(row);
+        if (row) openAccountModal(row.dataset.uid);
+        return;
+    }
+
+    // 📧 Re-send login credentials (admin action — issues & emails a NEW
+    //    temporary password; the old one keeps working until delivery succeeds)
+    var resendCredLink = e.target.closest('a.resend-cred');
+    if (resendCredLink) {
+        e.preventDefault();
+        var row = _activeDropdown ? _activeDropdown.menu._row : resendCredLink.closest('tr');
+        closeAllDropdowns();
+        if (!row || !row.dataset.uid) return;
+        if (!confirm('Re-send this account\'s login credentials?\n\nA NEW temporary password will be emailed to the account owner — their current password stops working once the email is delivered.')) return;
+        fetch('../phpLogics/resendCredentials.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: 'uid=' + encodeURIComponent(row.dataset.uid) + '&csrf_token=' + encodeURIComponent(CSRF_TOKEN)
+        })
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                showToast(d.message || (d.success ? 'Credentials re-sent.' : 'Could not re-send credentials.'), d.success ? 'success' : 'error');
+            })
+            .catch(function () { showToast('Network error. Please try again.', 'error'); });
         return;
     }
 
@@ -680,7 +753,7 @@ function openEditModal(row) {
     if (clearBtn) clearBtn.style.display = 'none';
     if (disp) {
         disp.innerHTML = photo
-            ? '<img src="../' + escapeHtml(photo) + '" alt="avatar" style="width:100%;height:100%;object-fit:cover;" onerror="this.parentElement.textContent=\'' + initials + '\'">'
+            ? '<img src="../phpLogics/download_profile.php?user_id=' + encodeURIComponent(row.dataset.uid || '') + '" alt="avatar" style="width:100%;height:100%;object-fit:cover;" onerror="this.parentElement.textContent=\'' + initials + '\'">'
             : initials;
     }
 
@@ -769,8 +842,8 @@ function validateForm() {
         { id: 'f-email',    err: 'err-email',    test: function (v) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim()); }, msg: 'Enter a valid email address.' },
         { id: 'f-contact',  err: 'err-contact',  test: function (v) { return /^[0-9]{7,11}$/.test(v.trim()); },        msg: 'Contact must be 7–11 digits.' },
         { id: 'f-password', err: 'err-password',
-          test: function (v) { return editingStudentId ? (v === '' || v.length >= 5) : v.length >= 5; },
-          msg: editingStudentId ? 'If changing, enter at least 5 characters.' : 'Password is required.' }
+          test: function (v) { return editingStudentId ? (v === '' || v.length >= 8) : v.length >= 8; },
+          msg: editingStudentId ? 'If changing, enter at least 8 characters.' : 'Password is required (at least 8 characters).' }
     ];
     rules.forEach(function (r) {
         var val = (document.getElementById(r.id) || {}).value || '';
@@ -815,6 +888,10 @@ function submitStudent() {
             if (data.success) {
                 closeAddModal();
                 showToast(editingStudentId ? 'Account updated!' : data.full_name + ' added!', 'success');
+                // Account created but the welcome email FAILED (e.g. Gmail
+                // daily sending limit / SMTP outage) — surface it loudly:
+                // without this warning nobody knows the credentials never arrived.
+                if (data.warning) showToast(data.warning, 'error');
                 loadStudents();
             } else {
                 showToast(data.message || 'Failed to save.', 'error');
@@ -826,59 +903,170 @@ function submitStudent() {
         });
 }
 
-/* ── View documents modal ── */
-function openDocsModal(row) {
-    var studentId   = row.dataset.id;
-    var studentName = row.dataset.fullname;
-
-    document.getElementById('viewDocsTitleText').textContent = 'Document Requests';
-    var body = document.getElementById('docs-modal-body');
+/* ── Account Information modal (row click / "View Account") ── */
+function openAccountModal(uid) {
+    if (!uid) return;
+    var body = document.getElementById('account-modal-body');
+    document.getElementById('aiTitleText').textContent = 'Account Information';
     body.innerHTML = '<p class="empty-state">Loading…</p>';
-    document.getElementById('viewDocsModal').classList.add('active');
+    document.getElementById('accountInfoModal').classList.add('active');
 
-    fetch('../phpLogics/getStudDocs.php?student_id=' + encodeURIComponent(studentId))
+    fetch('../phpLogics/getAccountDetails.php?uid=' + encodeURIComponent(uid))
         .then(function (res) { return res.json(); })
-        .then(function (data) { renderDocsModal(body, studentName, data); })
+        .then(function (data) {
+            if (!data || !data.success || !data.account) {
+                body.innerHTML = '<p class="empty-state">' + svgIcon('x-circle', 22) +
+                    ' ' + escapeHtml((data && data.message) || 'Failed to load the account.') + '</p>';
+                return;
+            }
+            renderAccountModal(data);
+        })
         .catch(function () {
-            body.innerHTML = '<p class="empty-state">' + svgIcon('x-circle', 22) + ' Failed to load requests.</p>';
+            body.innerHTML = '<p class="empty-state">' + svgIcon('x-circle', 22) + ' Network error. Please try again.</p>';
         });
 }
 
-function renderDocsModal(body, studentName, counts) {
-    var docTypes = [
-        { key: 'certificate_of_enrollment',            label: 'Cert. of Enrollment',      icon: 'file-text' },
-        { key: 'certificate_of_grades',                label: 'Cert. of Grades',          icon: 'chart' },
-        { key: 'certificate_of_good_moral',            label: 'Good Moral',               icon: 'award' },
-        { key: 'certificate_of_transfer',              label: 'Cert. of Transfer',        icon: 'repeat' },
-        { key: 'certificate_of_completion_graduation', label: 'Completion / Graduation',  icon: 'graduation' },
-        { key: 'other',                                label: 'Other',                    icon: 'folder' }
-    ];
-
-    var total = docTypes.reduce(function (sum, d) { return sum + (parseInt(counts[d.key]) || 0); }, 0);
-
-    var html = '<div class="docs-student-name">Requests for <strong>' + escapeHtml(studentName) +
-        '</strong> — <span style="color:var(--green-dark);font-weight:600">' + total + ' total</span></div>';
-
-    html += '<div class="docs-grid">';
-    docTypes.forEach(function (d) {
-        var n = parseInt(counts[d.key]) || 0;
-        html += '<div class="doc-card">'
-            + '<span class="doc-icon">' + d.icon + '</span>'
-            + '<div class="doc-label">' + d.label + '</div>'
-            + '<div class="doc-count' + (n === 0 ? ' zero' : '') + '">' + n + '</div>'
-            + '</div>';
-    });
-    html += '</div>';
-
-    if (total === 0) {
-        html += '<p class="empty-state">No document requests yet.</p>';
+function aiAvatarHtml(a) {
+    var name = ((a.first_name || '') + ' ' + (a.last_name || '')).trim();
+    var initials = escapeHtml((name.charAt(0).toUpperCase() || '?'));
+    if (a.profile_photo) {
+        // Authenticated endpoint — photos are never served as direct files
+        return '<img src="../phpLogics/download_profile.php?user_id=' + encodeURIComponent(a.id) +
+               '" alt="avatar" onerror="this.outerHTML=\'<span class=&quot;ai-avatar-fallback&quot;>' + initials + '</span>\'">';
     }
-
-    body.innerHTML = html;
+    return '<span class="ai-avatar-fallback">' + initials + '</span>';
 }
 
-function closeDocsModal() {
-    document.getElementById('viewDocsModal').classList.remove('active');
+function aiRoleBadge(role) {
+    var r = String(role || '').toLowerCase();
+    return '<span class="role-badge role-' + (r || 'other') + '">' + escapeHtml(role || '—') + '</span>';
+}
+
+function aiStatusBadge(status) {
+    var archived = String(status || '').toLowerCase() === 'archived';
+    return archived
+        ? '<span class="acc-status archived">Archived</span>'
+        : '<span class="acc-status active">Active</span>';
+}
+
+function aiReqBadge(status, cancelledBy) {
+    // Mirrors the badges used across the dashboards
+    if (status === 'Cancelled') {
+        return cancelledBy === 'registrar'
+            ? '<span class="badge rejected">Rejected</span>'
+            : '<span class="badge cancelled">Cancelled</span>';
+    }
+    var cls = { 'Pending': 'pending', 'Processing': 'processing',
+                'Ready for Pickup': 'ready', 'Released': 'released' }[status] || 'pending';
+    return '<span class="badge ' + cls + '">' + escapeAttr(status) + '</span>';
+}
+
+function aiCell(label, value) {
+    var v = (value === null || value === undefined || value === '') ? '—' : String(value);
+    return '<div class="ai-info-cell">' +
+        '<span class="ai-info-label">' + escapeHtml(label) + '</span>' +
+        '<span class="ai-info-value">' + escapeHtml(v) + '</span>' +
+        '</div>';
+}
+
+function aiDate(s) {
+    if (!s) return '—';
+    var d = new Date(String(s).replace(' ', 'T'));
+    return isNaN(d.getTime()) ? '—' : d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+}
+
+function renderAccountModal(data) {
+    var a = data.account, reqs = data.requests || [], c = data.counts || {};
+    var fullName = ((a.first_name || '') + ' ' + (a.last_name || '')).trim();
+    document.getElementById('aiTitleText').textContent = 'Account Information — ' + fullName;
+
+    var html = '';
+
+    /* ── Identity header ── */
+    html += '<div class="ai-head">' +
+        '<span class="ai-avatar">' + aiAvatarHtml(a) + '</span>' +
+        '<div class="ai-head-main">' +
+            '<div class="ai-head-name">' + escapeHtml(fullName) +
+                aiRoleBadge(a.role) + aiStatusBadge(a.status) + '</div>' +
+            '<div class="ai-head-sub">' + escapeHtml(a.student_id ? ('Student ID: ' + a.student_id) : 'No school number (staff account)') + '</div>' +
+        '</div>' +
+        '</div>';
+
+    /* ── Account information grid ── */
+    html += '<p class="form-section-title">Account Information</p>';
+    html += '<div class="ai-info-grid">';
+    html += aiCell('Student ID', a.student_id);
+    html += aiCell('LRN', a.lrn);
+    html += aiCell('Grade Level', a.grade_level);
+    html += aiCell('Last School Year Attended', a.school_year_last_attended);
+    html += aiCell('Email', a.email);
+    html += aiCell('Contact Number', a.contact);
+    html += aiCell('Role', a.role);
+    html += aiCell('Status', a.status);
+    html += aiCell('Member Since', aiDate(a.created_at));
+    html += '</div>';
+
+    /* ── Requested certificates ── */
+    html += '<p class="form-section-title">Requested Certificates</p>';
+    html += '<div class="ai-counts">' +
+        '<span class="ai-chip">Total <strong>' + (c.total || 0) + '</strong></span>' +
+        '<span class="ai-chip ai-pending">Pending <strong>' + (c.pending || 0) + '</strong></span>' +
+        '<span class="ai-chip ai-processing">Processing <strong>' + (c.processing || 0) + '</strong></span>' +
+        '<span class="ai-chip ai-released">Released <strong>' + (c.released || 0) + '</strong></span>' +
+        '<span class="ai-chip ai-rejected">Rejected <strong>' + (c.rejected || 0) + '</strong></span>' +
+        '<span class="ai-chip ai-cancelled">Cancelled <strong>' + (c.cancelled || 0) + '</strong></span>' +
+        '</div>';
+
+    if (!reqs.length) {
+        html += '<p class="empty-state">' + svgIcon('inbox', 26) + '<br>No document requests yet.</p>';
+    } else {
+        html += '<div class="ai-req-wrap"><table class="ai-req-table">' +
+            '<thead><tr>' +
+            '<th>Req ID</th><th>Document</th><th>Date Requested</th><th>Status</th><th>Date Released</th><th>Files</th>' +
+            '</tr></thead><tbody>';
+        reqs.forEach(function (r) {
+            var cancelledBy = String(r.cancelled_by || '').trim();
+
+            var files = '';
+            if (r.e_certificate) {
+                files += '<a class="ai-file-link" target="_blank" rel="noopener" title="View the released e-Certificate"' +
+                    ' href="../phpLogics/downloadReqFile.php?req_id=' + encodeURIComponent(r.id) + '&field=e_certificate">' +
+                    svgIcon('award', 12) + ' e-Cert</a>';
+            }
+            if (r.id_photo) {
+                files += '<a class="ai-file-link" target="_blank" rel="noopener" title="View the submitted Valid ID"' +
+                    ' href="../phpLogics/downloadReqFile.php?req_id=' + encodeURIComponent(r.id) + '&field=id_photo">' +
+                    svgIcon('id-card', 12) + ' Valid ID</a>';
+            }
+            if (!files) files = '<span class="ai-file-none">—</span>';
+
+            // Rejected rows carry the registrar's written reason
+            var reason = (r.status === 'Cancelled' && cancelledBy === 'registrar' && r.rejection_reason)
+                ? '<div class="ai-reject-reason">' + svgIcon('message', 11) + ' ' + escapeHtml(r.rejection_reason) + '</div>'
+                : '';
+            var purpose = r.purpose
+                ? '<div class="ai-purpose" title="' + escapeAttr(r.purpose) + '">Purpose: ' + escapeHtml(r.purpose) + '</div>'
+                : '';
+
+            html += '<tr>' +
+                '<td><strong>REQ-' + String(r.id).padStart(4, '0') + '</strong></td>' +
+                '<td>' + escapeHtml(r.document_type || '—') + reason + purpose + '</td>' +
+                '<td>' + aiDate(r.date_requested) + '</td>' +
+                '<td>' + aiReqBadge(r.status, cancelledBy) + '</td>' +
+                '<td>' + aiDate(r.date_released) + '</td>' +
+                '<td>' + files + '</td>' +
+                '</tr>';
+        });
+        html += '</tbody></table></div>';
+    }
+
+    document.getElementById('account-modal-body').innerHTML = html;
+}
+
+function closeAccountModal() {
+    document.getElementById('accountInfoModal').classList.remove('active');
+    document.getElementById('account-modal-body').innerHTML = '';
+    document.getElementById('aiTitleText').textContent = 'Account Information';
 }
 
 /* ── CSV import ── */
@@ -890,7 +1078,9 @@ function handleCsvImport(file) {
 
         var headers = lines[0].split(',').map(function (h) { return h.trim().toLowerCase().replace(/\s+/g, '_'); });
 
-        var required = ['first_name', 'last_name', 'role', 'email', 'contact'];
+        // Only name + email are mandatory — role defaults to Student,
+        // contact is optional, passwords are auto-generated server-side.
+        var required = ['first_name', 'last_name', 'email'];
         var missing  = required.filter(function (r) { return headers.indexOf(r) === -1; });
         if (missing.length) {
             showToast('CSV missing columns: ' + missing.join(', '), 'error');
@@ -993,14 +1183,18 @@ function executeCsvImport(rows, btn) {
     btn.disabled    = true;
     btn.textContent = '⏳ Importing…';
 
-    var success = 0, failed = 0;
+    var success = 0, failed = 0, mailWarned = 0, failures = [];
 
     function importNext(idx) {
         if (idx >= rows.length) {
             btn.disabled    = false;
             btn.textContent = 'Importing…';
             document.getElementById('csvPreviewModal').classList.remove('active');
-            showToast('Import done: ' + success + ' added, ' + failed + ' failed.', success > 0 ? 'success' : 'error');
+            showToast('Import finished: ' + success + ' added'
+                + (mailWarned ? ' (' + mailWarned + ' welcome email(s) FAILED — note their passwords!)' : '')
+                + ', ' + failed + ' failed'
+                + (failed ? ' — see details.' : '.'), (success > 0 && !failed) ? 'success' : 'error');
+            if (failed || mailWarned) showCsvImportResults(success, failures, mailWarned);
             loadStudents();
             return;
         }
@@ -1024,13 +1218,86 @@ function executeCsvImport(rows, btn) {
         fetch('../phpLogics/addStud.php', { method: 'POST', body: fd })
             .then(function (res) { return res.json(); })
             .then(function (data) {
-                if (data.success) success++; else failed++;
+                if (data.success) {
+                    success++;
+                    // Account created but its welcome email FAILED — the
+                    // student won't know their credentials until mail works.
+                    if (data.warning) mailWarned++;
+                }
+                else {
+                    failed++;
+                    failures.push({ row: idx + 2, r: r, reason: data.message || 'Unknown error' });
+                }
                 importNext(idx + 1);
             })
-            .catch(function () { failed++; importNext(idx + 1); });
+            .catch(function () {
+                failed++;
+                failures.push({ row: idx + 2, r: r, reason: 'Network or server error (row not imported)' });
+                importNext(idx + 1);
+            });
     }
 
     importNext(0);
+}
+
+/* Import results — lists each failed CSV row (row # = header is row 1)
+   with the server's rejection reason, so admins can fix and re-import. */
+function showCsvImportResults(success, failures, mailWarned) {
+    var overlay = document.getElementById('csvImportResultsModal');
+    if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.id        = 'csvImportResultsModal';
+        overlay.className = 'modal-overlay';
+        overlay.innerHTML =
+            '<div class="modal-box modal-box--wide">' +
+                '<div class="modal-header">' +
+                    '<h3>' + svgIcon('x-circle', 16) + ' Import Results</h3>' +
+                    '<button id="btn-close-csv-results" class="modal-close" type="button">' + svgIcon('x', 13) + '</button>' +
+                '</div>' +
+                '<div class="modal-body" id="csv-import-results-body" style="overflow-x:auto"></div>' +
+                '<div class="modal-footer" style="display:flex;gap:.75rem;justify-content:flex-end">' +
+                    '<button id="btn-ok-csv-results" class="save-btn" type="button">OK</button>' +
+                '</div>' +
+            '</div>';
+        document.body.appendChild(overlay);
+        overlay.addEventListener('click', function (e) {
+            if (e.target === overlay) overlay.classList.remove('active');
+        });
+        document.getElementById('btn-close-csv-results').addEventListener('click', function () {
+            overlay.classList.remove('active');
+        });
+        document.getElementById('btn-ok-csv-results').addEventListener('click', function () {
+            overlay.classList.remove('active');
+        });
+    }
+
+    var html = '<p style="margin-bottom:0.75rem;color:#555;">' + success + ' row(s) imported, <strong>'
+             + failures.length + ' failed</strong>. Fix the rows below in your CSV and import again:</p>';
+    if (mailWarned) {
+        html += '<p style="margin-bottom:0.75rem;color:#b91c1c;"><strong>' + mailWarned + ' welcome email(s) could not be sent</strong> '
+              + '(mail server refused — e.g. Gmail daily limit). Those accounts exist, but the students '
+              + 'have not received their credentials. Passwords follow the rule <strong>YEAR-LAST5OFLRN</strong> '
+              + 'when an LRN was provided; otherwise re-issue via Forgot Credentials once mail works.</p>';
+    }
+    html += '<table style="width:100%;border-collapse:collapse;font-size:0.8rem"><thead><tr>'
+         +  '<th style="padding:6px 8px;background:#f3f4f6;border:1px solid #e5e7eb;text-align:left">CSV Row</th>'
+         +  '<th style="padding:6px 8px;background:#f3f4f6;border:1px solid #e5e7eb;text-align:left">Name</th>'
+         +  '<th style="padding:6px 8px;background:#f3f4f6;border:1px solid #e5e7eb;text-align:left">Email</th>'
+         +  '<th style="padding:6px 8px;background:#f3f4f6;border:1px solid #e5e7eb;text-align:left">Reason</th>'
+         +  '</tr></thead><tbody>';
+    failures.forEach(function (f) {
+        var name  = ((f.r.first_name || '') + ' ' + (f.r.last_name || '')).trim();
+        html += '<tr>'
+             +  '<td style="padding:5px 8px;border:1px solid #e5e7eb">' + f.row + '</td>'
+             +  '<td style="padding:5px 8px;border:1px solid #e5e7eb">' + escapeHtml(name) + '</td>'
+             +  '<td style="padding:5px 8px;border:1px solid #e5e7eb">' + escapeHtml(f.r.email || '') + '</td>'
+             +  '<td style="padding:5px 8px;border:1px solid #e5e7eb;color:#b91c1c">' + escapeHtml(f.reason) + '</td>'
+             +  '</tr>';
+    });
+    html += '</tbody></table>';
+
+    document.getElementById('csv-import-results-body').innerHTML = html;
+    document.getElementById('csvImportResultsModal').classList.add('active');
 }
 
 /* ══════════ Boot ══════════ */
@@ -1048,7 +1315,23 @@ document.addEventListener('DOMContentLoaded', function () {
 
     // Accounts
     loadStudents();
-    document.getElementById('student-search').addEventListener('input', applyFilters);
+    document.getElementById('student-search').addEventListener('input', function () {
+        currentPage = 1;              // new search → back to page 1
+        applyFilters();
+    });
+
+    // Pagination — pager buttons (delegated; the pager re-renders itself)
+    document.getElementById('accounts-pager').addEventListener('click', function (e) {
+        var btn = e.target.closest('.ap-btn');
+        if (!btn || btn.disabled) return;
+        var p = parseInt(btn.dataset.page, 10);
+        if (!p || p < 1) return;
+        currentPage = p;
+        renderAccountsPage();
+        var box = document.getElementById('view-accounts');
+        if (box) box.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+
     document.getElementById('btn-open-modal').addEventListener('click', function (e) {
         e.preventDefault();
         openAddModal();
@@ -1059,8 +1342,8 @@ document.addEventListener('DOMContentLoaded', function () {
         if (e.target === this) closeAddModal();
     });
 
-    document.getElementById('tab-enrolled').addEventListener('click', function () { switchRecView('enrolled'); });
-    document.getElementById('tab-alumni').addEventListener('click', function () { switchRecView('alumni'); });
+    document.getElementById('tab-enrolled').addEventListener('click', function () { currentPage = 1; switchRecView('enrolled'); });
+    document.getElementById('tab-alumni').addEventListener('click', function () { currentPage = 1; switchRecView('alumni'); });
 
     document.getElementById('f-photo').addEventListener('change', function () { previewModalAvatar(this); });
     document.getElementById('modal-photo-clear').addEventListener('click', clearModalAvatar);
@@ -1109,6 +1392,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 e.preventDefault();
                 e.stopPropagation();
                 currentRoleFilter = this.dataset.role;
+                currentPage = 1;   // new role filter → back to page 1
                 roleDrop.querySelectorAll('a').forEach(function (x) { x.classList.remove('active'); });
                 this.classList.add('active');
                 roleDrop.classList.remove('open');
@@ -1125,11 +1409,23 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     }
 
-    // Docs modal
-    document.getElementById('btn-close-docs-modal').addEventListener('click', closeDocsModal);
-    var docsOverlay = document.getElementById('viewDocsModal');
-    docsOverlay.addEventListener('click', function (e) {
-        if (e.target === docsOverlay) closeDocsModal();
+    // Account information modal (row click / ⋮ menu)
+    document.getElementById('btn-close-account-modal').addEventListener('click', closeAccountModal);
+    var accountOverlay = document.getElementById('accountInfoModal');
+    accountOverlay.addEventListener('click', function (e) {
+        if (e.target === accountOverlay) closeAccountModal();
+    });
+
+    // Clicking a row in the Accounts table opens the account details modal
+    // (clicks on the ⋮ dropdown / links / buttons are ignored)
+    var recordsTbody = document.getElementById('records-tbody');
+    recordsTbody.addEventListener('click', function (e) {
+        if (e.target.closest('.dots-btn') || e.target.closest('.dropdown') ||
+            e.target.closest('a') || e.target.closest('button')) return;
+        var row = e.target.closest('tr');
+        if (!row || row.classList.contains('no-results-row')) return;
+        if (!row.dataset.uid) return;
+        openAccountModal(row.dataset.uid);
     });
 
     // Settings (branding only — hours/contacts moved to the Information view)
@@ -1314,9 +1610,9 @@ document.addEventListener('DOMContentLoaded', function () {
         var av = document.getElementById('ms-avatar');
         av.innerHTML = '';
         av.textContent = initialsOf(d.student || '');
-        if (d.avatar) {
+        if (d.avatar && d.avatarUser) {
             var img = document.createElement('img');
-            img.src = '../' + d.avatar;
+            img.src = '../phpLogics/download_profile.php?user_id=' + encodeURIComponent(d.avatarUser);
             img.alt = '';
             img.onerror = function () { img.remove(); };
             av.appendChild(img);

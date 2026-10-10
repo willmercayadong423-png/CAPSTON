@@ -1,4 +1,4 @@
-/* HEHMS — JS icon helper (assets/js/icons.js)
+/* HEHMHS — JS icon helper (assets/js/icons.js)
    Auto-generated from phpLogics/icons.php — keep in sync.
    svgIcon('bell', 16) mirrors PHP icon('bell', 16). */
 function svgIcon(name, size) {

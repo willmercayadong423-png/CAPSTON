@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>HEHMHS — Normalization with Diagrams (UNF → 1NF → 2NF → 3NF)</title>
+<style>
+  :root { --navy:#1f3864; --green:#4a6741; --amber:#b45309; --line:#d5dbe5;
+          --red:#b3261e; --pkbg:#fff3cd; --fkbg:#e3edff; --dupbg:#fde8e8; }
+  * { box-sizing:border-box; }
+  body { font-family:'Segoe UI', Arial, sans-serif; background:#f4f6fa; color:#1c1c1c;
+         margin:0; padding:24px; }
+  .page { max-width:1060px; margin:0 auto; }
+  h1 { color:var(--navy); text-align:center; margin:6px 0 2px; font-size:26px; }
+  .sub { text-align:center; color:#666; margin:0 0 22px; }
+  .card { background:#fff; border:1px solid var(--line); border-radius:10px;
+          padding:22px 26px; margin:0 0 20px; page-break-inside:avoid; }
+  h2 { color:var(--navy); font-size:19px; margin:0 0 12px;
+       border-bottom:2px solid var(--line); padding-bottom:6px; }
+  h2 .tag { float:right; font-size:12px; font-weight:600; color:#fff;
+            background:var(--green); border-radius:12px; padding:3px 12px; margin-top:2px; }
+  .stage-arrow { text-align:center; color:var(--navy); font-size:20px; font-weight:600;
+                 margin:-6px 0 14px; }
+  .stage-arrow small { display:block; font-size:12px; color:#555; font-weight:400; }
+  .legend { display:flex; gap:14px; flex-wrap:wrap; font-size:12px; margin:8px 0 14px;
+            padding:8px 12px; background:#f7f9fc; border:1px dashed var(--line); border-radius:8px; }
+  .legend span { display:inline-flex; align-items:center; gap:5px; }
+  .sw { width:14px; height:14px; border-radius:3px; border:1px solid #bbb; display:inline-block; }
+
+  /* ── data grids ── */
+  table.grid { border-collapse:collapse; font-size:12.5px; margin:10px 0; }
+  .grid th { background:var(--navy); color:#fff; padding:6px 10px; border:1px solid #35507e; text-align:left; }
+  .grid td { border:1px solid var(--line); padding:5px 10px; background:#fff; }
+  .grid tr:nth-child(even) td { background:#f7f9fc; }
+  td.pk, th.pk { background:var(--pkbg) !important; font-weight:700; }
+  td.fk { background:var(--fkbg) !important; }
+  td.dup { background:var(--dupbg) !important; }
+  td.dup2 { background:#fce9fb !important; }
+  .grid td .badge { font-size:10px; padding:1px 6px; border-radius:8px; color:#fff; vertical-align:middle; }
+  .badge.pk { background:var(--amber); } .badge.fk { background:#3b6ea5; }
+  .callout { background:#eef3ea; border-left:4px solid var(--green); padding:8px 14px;
+             border-radius:0 6px 6px 0; margin:10px 0; font-size:13.5px; }
+  .callout.bad { background:#fdeeee; border-left-color:var(--red); }
+  .callout b.red { color:var(--red); }
+
+  /* ── UNF logbook ── */
+  .logbook { display:flex; gap:18px; flex-wrap:wrap; }
+  .pagebox { flex:1; min-width:300px; background:#fffdf3; border:2px solid #c9b458;
+             border-radius:8px; padding:0; font-size:12.5px; }
+  .pagebox .hdr { background:#f3ecc9; border-bottom:2px solid #c9b458; padding:8px 12px;
+                  font-weight:700; color:#6b5d1e; }
+  .pagebox .body { padding:10px 12px; }
+  .kv { margin:2px 0; }
+  .kv b { color:#6b5d1e; }
+  .reqgrp { border:1.5px dashed #b3261e; border-radius:6px; margin:8px 0 4px; padding:8px 10px; position:relative; }
+  .reqgrp .lbl { position:absolute; top:-9px; right:8px; background:var(--red); color:#fff;
+                 font-size:10px; padding:1px 8px; border-radius:8px; }
+  .req { background:#fff; border:1px solid #d8cfa0; border-radius:5px; padding:6px 9px; margin:6px 0; }
+  .req b { color:var(--navy); }
+
+  /* ── dependency chips ── */
+  .fdmap { font-size:13px; background:#f7f9fc; border:1px solid var(--line);
+           border-radius:8px; padding:12px 14px; margin:10px 0; }
+  .fdrow { display:flex; align-items:center; gap:8px; margin:7px 0; flex-wrap:wrap; }
+  .chip { border:1.5px solid var(--navy); background:#fff; border-radius:6px;
+          padding:3px 9px; font-weight:600; color:var(--navy); }
+  .chip.dep { border-color:#777; color:#333; font-weight:500; }
+  .chip.hot { border-color:var(--red); color:var(--red); }
+  .arr { color:#555; font-size:15px; }
+  .verdict { font-size:12px; font-weight:700; padding:2px 10px; border-radius:10px; }
+  .verdict.no  { background:#fde8e8; color:var(--red); }
+  .verdict.yes { background:#e7f0e3; color:var(--green); }
+  .split { font-size:11px; color:#777; margin-left:4px; }
+
+  /* ── split / flow diagrams ── */
+  .flowwrap { display:flex; gap:12px; align-items:stretch; flex-wrap:wrap; margin:12px 0; }
+  .tblbox { border:1.5px solid var(--navy); border-radius:8px; overflow:hidden;
+            font-size:12px; background:#fff; min-width:170px; flex:1; }
+  .tblbox .th { background:var(--navy); color:#fff; font-weight:700; padding:6px 10px;
+                text-align:center; font-size:12.5px; }
+  .tblbox .tr { padding:4px 10px; border-top:1px solid #e8edf5; display:flex; justify-content:space-between; gap:8px; }
+  .tblbox .tr:first-of-type { border-top:none; }
+  .tblbox .tr span.k { font-weight:700; }
+  .tblbox .tr .pk { color:var(--amber); font-weight:800; }
+  .tblbox .tr .fk { color:#3b6ea5; font-weight:800; }
+  .flowarrow { align-self:center; color:var(--navy); font-size:20px; font-weight:700; }
+  .from1 { outline:2px solid var(--amber); } .from2 { outline:2px solid #3b6ea5; }
+  .from3 { outline:2px solid var(--green); }
+  .provenance { font-size:12px; margin-top:6px; }
+  .pv { display:inline-block; width:12px; height:12px; border-radius:3px; margin-right:4px;
+        vertical-align:-1px; border:1px solid #999; }
+
+  .note { font-size:12.5px; color:#555; }
+  ul { margin:8px 0; padding-left:22px; } li { margin:4px 0; }
+  @media print { body{background:#fff;padding:0} .card{border:none;page-break-inside:avoid} }
+</style>
+</head>
+<body>
+<div class="page">
+
+<h1>HEHMHS Database Normalization — Diagrammed</h1>
+<p class="sub">Unnormalized Form → 1NF → 2NF → 3NF &nbsp;·&nbsp; the final diagram is the live <code>hehms</code> database</p>
+
+<div class="legend">
+  <span><span class="sw" style="background:var(--pkbg)"></span> Primary key</span>
+  <span><span class="sw" style="background:var(--fkbg)"></span> Foreign key</span>
+  <span><span class="sw" style="background:var(--dupbg)"></span> Redundant / duplicated data (the problem)</span>
+  <span><span class="sw" style="background:#fce9fb"></span> Same value repeated again</span>
+</div>
+
+<!-- ════════════════ STAGE 0 · FDs ════════════════ -->
+<div class="card">
+<h2>Stage 0 — Functional Dependencies <span class="tag">what determines what</span></h2>
+<div class="fdmap">
+  <div class="fdrow"><span class="chip">StudentID</span><span class="arr">──▶</span>
+    <span class="chip dep">Name</span><span class="chip dep">Email</span><span class="chip dep">Contact</span>
+    <span class="chip dep">Password</span><span class="chip dep">Status</span><span class="chip dep">RoleID</span>
+    <span class="chip dep">LRN</span><span class="chip dep">GradeLevel</span><span class="chip dep">SY</span></div>
+  <div class="fdrow"><span class="chip">RoleID</span><span class="arr">──▶</span><span class="chip dep">RoleName</span></div>
+  <div class="fdrow"><span class="chip">RequestID</span><span class="arr">──▶</span>
+    <span class="chip dep">StudentID</span><span class="chip dep">DocTypeID</span><span class="chip dep">Purpose</span>
+    <span class="chip dep">Status</span><span class="chip dep">Dates</span><span class="chip dep">Files</span></div>
+  <div class="fdrow"><span class="chip">DocTypeID</span><span class="arr">──▶</span>
+    <span class="chip dep">DocName</span><span class="chip dep">RequiresGradeLevel</span><span class="chip dep">IsActive</span></div>
+  <div class="fdrow"><span class="chip">AnnouncementID</span><span class="arr">──▶</span>
+    <span class="chip dep">Title</span><span class="chip dep">Message</span><span class="chip dep">AuthorUserID</span></div>
+</div>
+<p class="note">Business rule (a <b>constraint</b>, not an FD): a student may have only
+<b>one active request</b> per document type.</p>
+</div>
+
+<!-- ════════════════ STAGE 1 · UNF ════════════════ -->
+<div class="card">
+<h2>Stage 1 — UNF · Unnormalized Form <span class="tag">the registrar's logbook</span></h2>
+<p>Everything lives on <b>one page per student</b>. Requests repeat inside the page —
+a <b>repeating group</b>. Cells hold several values; nothing has a key.</p>
+
+<div class="logbook">
+  <div class="pagebox">
+    <div class="hdr">📘 STUDENT PAGE — 2026-0001</div>
+    <div class="body">
+      <div class="kv"><b>Name:</b> Willmer Cayadong &nbsp; <b>Role:</b> Student</div>
+      <div class="kv"><b>Email:</b> cayadongwillmer81@gmail.com</div>
+      <div class="kv"><b>LRN:</b> 136125001234 &nbsp; <b>Grade:</b> Grade 12</div>
+      <div class="kv"><b>SY attended:</b> 2024-2025 &nbsp; <b>Status:</b> active</div>
+      <div class="reqgrp"><span class="lbl">REPEATING GROUP (1 : many)</span>
+        <div class="req"><b>REQ-0049</b> · Certificate of Good Moral<br>Pending · 2026-10-04 · [Valid ID photo]</div>
+        <div class="req"><b>REQ-0037</b> · Certificate of Enrollment<br>Released · 2026-09-20 · [cert_0037.pdf]</div>
+      </div>
+    </div>
+  </div>
+  <div class="pagebox">
+    <div class="hdr">📘 STUDENT PAGE — 2026-0002</div>
+    <div class="body">
+      <div class="kv"><b>Name:</b> Juan Dela Cruz &nbsp; <b>Role:</b> Student</div>
+      <div class="kv"><b>Email:</b> juan@hehms.edu.ph</div>
+      <div class="kv"><b>LRN:</b> 123456789012 &nbsp; <b>Grade:</b> —</div>
+      <div class="kv"><b>SY attended:</b> 2023-2024 &nbsp; <b>Status:</b> active</div>
+      <div class="reqgrp"><span class="lbl">REPEATING GROUP (1 : many)</span>
+        <div class="req"><b>REQ-0050</b> · Certificate of Good Moral<br>Pending · 2026-10-04 · [Valid ID photo]</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<pre style="margin-top:12px">STUDENT_LOG ( StudentID, Name, Email, Contact, Password, RoleName, Status, LRN,
+              GradeLevel, SYLastAttended, Photo,
+              <b>{ RequestNo, DocName, DocRequiresGL, Purpose, ReqGradeLevel, ReqSY,
+                 ReqStatus, DateRequested, DateReleased, IDPhoto, ECertificate }</b> )   ← repeating group</pre>
+
+<div class="callout bad"><b class="red">Problems:</b> repeating groups · non-atomic cells ·
+massive duplication · <b>update anomaly</b> (fix an email on 10 pages) ·
+<b>insert anomaly</b> (new student with no requests has no page section) ·
+<b>delete anomaly</b> (remove the last request → the student disappears).</div>
+</div>
+
+<div class="stage-arrow">▼ make every cell atomic · flatten the repeating group · pick a primary key
+<small>→ First Normal Form</small></div>
+
+<!-- ════════════════ STAGE 2 · 1NF ════════════════ -->
+<div class="card">
+<h2>Stage 2 — 1NF · First Normal Form <span class="tag">atomic values, one row per request</span></h2>
+<p>Each request becomes its own row; <b>RequestNo</b> is the primary key.
+Shaded cells expose the price: <b>student data now repeats on every request row.</b></p>
+
+<table class="grid">
+<tr><th class="pk">RequestNo <span class="badge pk">PK</span></th><th>StudentID</th><th>Name</th><th>Email</th><th>LRN</th><th>GradeLevel</th><th>RoleName</th><th>DocName</th><th>DocReqGL</th><th>Purpose</th><th>Status</th></tr>
+<tr><td class="pk">0037</td><td>2026-0001</td><td>Willmer Cayadong</td><td>cayadong…@gmail.com</td><td>136125…</td><td>Grade 12</td><td class="dup">Student</td><td>Certificate of Enrollment</td><td class="dup2">1</td><td>Scholarship</td><td>Released</td></tr>
+<tr><td class="pk">0049</td><td>2026-0001</td><td class="dup">Willmer Cayadong</td><td class="dup">cayadong…@gmail.com</td><td class="dup">136125…</td><td class="dup">Grade 12</td><td class="dup">Student</td><td>Certificate of Good Moral</td><td class="dup2">0</td><td>College application</td><td>Pending</td></tr>
+<tr><td class="pk">0050</td><td>2026-0002</td><td>Juan Dela Cruz</td><td>juan@hehms.edu.ph</td><td>123456…</td><td>—</td><td class="dup">Student</td><td>Certificate of Good Moral</td><td class="dup2">0</td><td>Employment</td><td>Pending</td></tr>
+</table>
+<p class="note">Pink = copied student data · magenta = document-type rule copied as text
+(“does this document require a Grade Level?” stored inside every request).</p>
+
+<div class="callout"><b>✅ 1NF satisfied</b> — atomic cells, unique rows, PK chosen.
+<b class="red">Still not done:</b> redundancy + all four anomalies remain, because
+non-key data depends on <i>parts</i> of the data, not the request itself.</div>
+</div>
+
+<div class="stage-arrow">▼ remove PARTIAL dependencies — attributes tied to only part of the key
+<small>→ Second Normal Form</small></div>
+
+<!-- ════════════════ STAGE 3 · 2NF ════════════════ -->
+<div class="card">
+<h2>Stage 3 — 2NF · Second Normal Form <span class="tag">no partial dependencies</span></h2>
+<p>Key the 1NF table by the natural composite key <b>( StudentID + RequestNo )</b>,
+then test every attribute against it:</p>
+
+<div class="fdmap">
+  <div class="fdrow"><span class="chip">StudentID</span><span class="arr">＋</span><span class="chip">RequestNo</span>
+    <span class="arr">══ composite key ══▶</span>
+    <span class="chip dep">Purpose</span><span class="chip dep">Status</span><span class="chip dep">Dates</span><span class="chip dep">Files</span>
+    <span class="verdict yes">✓ full key</span></div>
+  <div class="fdrow"><span class="chip">StudentID</span><span class="arr">──alone──▶</span>
+    <span class="chip dep">Name</span><span class="chip dep">Email</span><span class="chip dep">LRN</span><span class="chip dep">GradeLevel</span><span class="chip dep">RoleName</span>
+    <span class="verdict no">✗ PARTIAL → pull out</span><span class="split">→ STUDENT</span></div>
+  <div class="fdrow"><span class="chip">DocName</span><span class="arr">──alone──▶</span>
+    <span class="chip dep">RequiresGradeLevel</span>
+    <span class="verdict no">✗ PARTIAL → pull out</span><span class="split">→ DOCUMENT_TYPE</span></div>
+</div>
+
+<p><b>The split</b> — each shaded outline shows where each column group moved:</p>
+<div class="flowwrap">
+  <div class="tblbox from1">
+    <div class="th">STUDENT <span style="font-weight:400;font-size:10px">(1 row per student)</span></div>
+    <div class="tr"><span class="k">StudentID</span><span class="pk">PK</span></div>
+    <div class="tr"><span>Name</span></div><div class="tr"><span>Email</span></div>
+    <div class="tr"><span>LRN</span></div><div class="tr"><span>GradeLevel · SY</span></div>
+    <div class="tr"><span>RoleName · Status</span></div>
+  </div>
+  <div class="flowarrow">◀──</div>
+  <div class="tblbox from2">
+    <div class="th">DOCUMENT_TYPE <span style="font-weight:400;font-size:10px">(1 row per type)</span></div>
+    <div class="tr"><span class="k">DocName</span><span class="pk">PK</span></div>
+    <div class="tr"><span>RequiresGradeLevel</span></div>
+  </div>
+  <div class="flowarrow">◀──</div>
+  <div class="tblbox from3">
+    <div class="th">REQUEST <span style="font-weight:400;font-size:10px">(1 row per request)</span></div>
+    <div class="tr"><span class="k">RequestNo</span><span class="pk">PK</span></div>
+    <div class="tr"><span>StudentID</span><span class="fk">FK</span></div>
+    <div class="tr"><span>DocName</span><span class="fk">FK</span></div>
+    <div class="tr"><span>Purpose · Status</span></div>
+    <div class="tr"><span>Dates · IDPhoto · Cert</span></div>
+  </div>
+</div>
+<div class="provenance">
+  <span class="pv" style="background:var(--pkbg)"></span>student-only columns &nbsp;
+  <span class="pv" style="background:var(--fkbg)"></span>type-rule columns &nbsp;
+  <span class="pv" style="background:#e7f0e3"></span>true request columns
+</div>
+
+<div class="callout"><b>✅ 2NF satisfied.</b> Willmer's data now stored <b>once</b>;
+a student with zero requests still exists; the “requires Grade Level?” rule lives
+in one place.</div>
+</div>
+
+<div class="stage-arrow">▼ remove TRANSITIVE dependencies — non-key → non-key chains
+<small>→ Third Normal Form</small></div>
+
+<!-- ════════════════ STAGE 4 · 3NF ════════════════ -->
+<div class="card">
+<h2>Stage 4 — 3NF · Third Normal Form <span class="tag">no transitive dependencies</span></h2>
+
+<p><b>Chain 1 — the role name.</b> Stored as free text on every student row:</p>
+<div class="fdmap">
+  <div class="fdrow"><span class="chip">StudentID</span><span class="arr">──▶</span>
+    <span class="chip hot">RoleName</span><span class="arr">──▶ (should constrain)</span>
+    <span class="chip dep">"Student | Registrar | Admin"</span>
+    <span class="verdict no">✗ transitive + typo risk (“Studnet”)</span></div>
+  <div class="fdrow" style="margin-left:24px"><span class="arr">FIX ▶</span>
+    <span class="chip">StudentID</span><span class="arr">──▶</span><span class="chip">RoleID</span>
+    <span class="arr">──▶</span><span class="chip">ROLES (RoleID PK, RoleName)</span>
+    <span class="verdict yes">✓ lookup table</span></div>
+</div>
+<table class="grid" style="max-width:640px">
+<tr><th>StudentID</th><th>RoleName <i>(before)</i></th><th>role_id <i>(after)</i></th></tr>
+<tr><td class="pk">2026-0001</td><td class="dup">Student</td><td class="fk">1</td></tr>
+<tr><td class="pk">2026-9000</td><td class="dup">Registrar</td><td class="fk">2</td></tr>
+<tr><td class="pk">2026-9002</td><td class="dup">Admin</td><td class="fk">3</td></tr>
+<tr><th></th><th>ROLES →</th><th style="background:#fff3cd">1·Student 2·Registrar 3·Admin</th></tr>
+</table>
+
+<p style="margin-top:14px"><b>Chain 2 — the document details.</b> Riding along as text on every request:</p>
+<div class="fdmap">
+  <div class="fdrow"><span class="chip">RequestNo</span><span class="arr">──▶</span>
+    <span class="chip hot">DocName</span><span class="arr">──▶</span>
+    <span class="chip dep">RequiresGradeLevel · IsActive</span>
+    <span class="verdict no">✗ transitive</span></div>
+  <div class="fdrow" style="margin-left:24px"><span class="arr">FIX ▶</span>
+    <span class="chip">RequestNo</span><span class="arr">──▶</span><span class="chip">DocTypeID</span>
+    <span class="arr">──▶</span><span class="chip">DOCUMENT_TYPES (DocTypeID PK)</span>
+    <span class="verdict yes">✓ surrogate key + FK</span></div>
+</div>
+
+<p style="margin-top:14px"><b>Chain 3 — the announcement author.</b></p>
+<div class="fdmap">
+  <div class="fdrow"><span class="chip">AnnouncementID</span><span class="arr">──▶</span>
+    <span class="chip hot">AuthorEmail</span><span class="arr">──▶</span>
+    <span class="chip dep">AuthorName · AuthorRole</span>
+    <span class="verdict no">✗ transitive</span></div>
+  <div class="fdrow" style="margin-left:24px"><span class="arr">FIX ▶</span>
+    <span class="chip">AnnouncementID</span><span class="arr">──▶</span>
+    <span class="chip">CreatedBy (FK → USERS)</span><span class="verdict yes">✓</span></div>
+</div>
+
+<div class="callout"><b>✅ 3NF satisfied.</b> Every non-key attribute now depends on
+<b>the key, the whole key, and nothing but the key.</b></div>
+</div>
+
+<!-- ════════════════ STAGE 5 · FINAL ════════════════ -->
+<div class="card">
+<h2>Final Result — the normalized schema <span class="tag">= the live database</span></h2>
+<p class="note">Solid arrows = enforced foreign keys (6). Dashed = intentional soft reference.
+This is exactly what <code>database/erd.html</code> generates from the live <code>hehms</code> database.</p>
+
+<svg viewBox="0 0 980 650" style="width:100%;height:auto;font-family:'Segoe UI',Arial,sans-serif" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="ah" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto">
+      <path d="M0,0 L9,4.5 L0,9 z" fill="#1f3864"/>
+    </marker>
+    <marker id="ahg" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto">
+      <path d="M0,0 L9,4.5 L0,9 z" fill="#8a8a8a"/>
+    </marker>
+  </defs>
+
+  <!-- relationships (drawn first, under the boxes) -->
+  <!-- users.role_id -> roles -->
+  <path d="M 392 92 L 224 100" stroke="#1f3864" stroke-width="2" fill="none" marker-end="url(#ah)"/>
+  <text x="268" y="86" font-size="11" fill="#1f3864" font-weight="700">N : 1</text>
+  <!-- users.id -> student_profiles.user_id -->
+  <path d="M 602 92 L 738 100" stroke="#1f3864" stroke-width="2" fill="none" marker-end="url(#ah)"/>
+  <text x="636" y="86" font-size="11" fill="#1f3864" font-weight="700">1 : 1</text>
+  <!-- document_requests.user_id -> users.id -->
+  <path d="M 470 284 L 470 240" stroke="#1f3864" stroke-width="2" fill="none" marker-end="url(#ah)"/>
+  <text x="478" y="266" font-size="11" fill="#1f3864" font-weight="700">N : 1  places</text>
+  <!-- document_requests.doc_type_id -> document_types.id -->
+  <path d="M 602 350 L 738 360" stroke="#1f3864" stroke-width="2" fill="none" marker-end="url(#ah)"/>
+  <text x="630" y="342" font-size="11" fill="#1f3864" font-weight="700">N : 1  categorizes</text>
+  <!-- announcements.created_by -> users.id -->
+  <path d="M 222 300 L 392 200" stroke="#1f3864" stroke-width="2" fill="none" marker-end="url(#ah)"/>
+  <text x="240" y="268" font-size="11" fill="#1f3864" font-weight="700">N : 1  authors</text>
+  <!-- audit_logs.user_id -> users.id -->
+  <path d="M 222 470 L 392 216" stroke="#1f3864" stroke-width="2" fill="none" marker-end="url(#ah)"/>
+  <text x="228" y="416" font-size="11" fill="#1f3864" font-weight="700">N : 1  generates</text>
+  <!-- credential_resend_log.email ~~ users.email (soft) -->
+  <path d="M 470 516 L 470 236" stroke="#8a8a8a" stroke-width="2" stroke-dasharray="6 5" fill="none" marker-end="url(#ahg)"/>
+  <text x="478" y="490" font-size="11" fill="#777" font-weight="700">soft ref (by email)</text>
+
+  <!-- ═ roles ═ -->
+  <g>
+    <rect x="40" y="64" width="184" height="86" rx="8" fill="#fff" stroke="#1f3864" stroke-width="1.6"/>
+    <rect x="40" y="64" width="184" height="24" rx="8" fill="#1f3864"/>
+    <text x="132" y="80" text-anchor="middle" fill="#fff" font-size="13" font-weight="700">roles</text>
+    <text x="52" y="104" font-size="11.5" fill="#b45309" font-weight="700">role_id PK</text>
+    <text x="52" y="121" font-size="11.5" fill="#333">role_name UK</text>
+    <text x="52" y="140" font-size="10.5" fill="#777">1 Student · 2 Registrar · 3 Admin</text>
+  </g>
+
+  <!-- ═ users ═ -->
+  <g>
+    <rect x="392" y="52" width="210" height="184" rx="8" fill="#fff" stroke="#1f3864" stroke-width="1.8"/>
+    <rect x="392" y="52" width="210" height="24" rx="8" fill="#1f3864"/>
+    <text x="497" y="68" text-anchor="middle" fill="#fff" font-size="13" font-weight="700">users</text>
+    <text x="404" y="92"  font-size="11.5" fill="#b45309" font-weight="700">id PK</text>
+    <text x="404" y="109" font-size="11.5" fill="#3b6ea5" font-weight="700">role_id FK → roles</text>
+    <text x="404" y="126" font-size="11.5" fill="#333">first_name · last_name</text>
+    <text x="404" y="143" font-size="11.5" fill="#333">email UK · contact</text>
+    <text x="404" y="160" font-size="11.5" fill="#333">password (bcrypt)</text>
+    <text x="404" y="177" font-size="11.5" fill="#333">status · profile_photo</text>
+    <text x="404" y="194" font-size="11.5" fill="#333">lockout / security</text>
+    <text x="404" y="212" font-size="10.5" fill="#777">identity + authentication only</text>
+  </g>
+
+  <!-- ═ student_profiles ═ -->
+  <g>
+    <rect x="738" y="64" width="204" height="128" rx="8" fill="#fff" stroke="#1f3864" stroke-width="1.6"/>
+    <rect x="738" y="64" width="204" height="24" rx="8" fill="#1f3864"/>
+    <text x="840" y="80" text-anchor="middle" fill="#fff" font-size="13" font-weight="700">student_profiles</text>
+    <text x="750" y="104" font-size="11.5" fill="#b45309" font-weight="700">user_id PK·FK → users</text>
+    <text x="750" y="121" font-size="11.5" fill="#333">student_id UK (2026-0001)</text>
+    <text x="750" y="138" font-size="11.5" fill="#333">lrn</text>
+    <text x="750" y="155" font-size="11.5" fill="#333">grade_level</text>
+    <text x="750" y="172" font-size="11.5" fill="#333">school_year_last_attended</text>
+  </g>
+
+  <!-- ═ announcements ═ -->
+  <g>
+    <rect x="40" y="288" width="184" height="104" rx="8" fill="#fff" stroke="#1f3864" stroke-width="1.6"/>
+    <rect x="40" y="288" width="184" height="24" rx="8" fill="#1f3864"/>
+    <text x="132" y="304" text-anchor="middle" fill="#fff" font-size="13" font-weight="700">announcements</text>
+    <text x="52" y="328" font-size="11.5" fill="#b45309" font-weight="700">id PK</text>
+    <text x="52" y="345" font-size="11.5" fill="#3b6ea5" font-weight="700">created_by FK → users</text>
+    <text x="52" y="362" font-size="11.5" fill="#333">title · message</text>
+    <text x="52" y="379" font-size="11.5" fill="#333">is_active</text>
+  </g>
+
+  <!-- ═ audit_logs ═ -->
+  <g>
+    <rect x="40" y="452" width="184" height="120" rx="8" fill="#fff" stroke="#1f3864" stroke-width="1.6"/>
+    <rect x="40" y="452" width="184" height="24" rx="8" fill="#1f3864"/>
+    <text x="132" y="468" text-anchor="middle" fill="#fff" font-size="13" font-weight="700">audit_logs</text>
+    <text x="52" y="492" font-size="11.5" fill="#b45309" font-weight="700">id PK</text>
+    <text x="52" y="509" font-size="11.5" fill="#3b6ea5" font-weight="700">user_id FK → users</text>
+    <text x="52" y="526" font-size="11.5" fill="#333">action · entity · entity_id</text>
+    <text x="52" y="543" font-size="11.5" fill="#333">actor_name (snapshot)</text>
+    <text x="52" y="560" font-size="11.5" fill="#333">ip_address · created_at</text>
+  </g>
+
+  <!-- ═ document_requests ═ -->
+  <g>
+    <rect x="392" y="284" width="210" height="170" rx="8" fill="#fff" stroke="#1f3864" stroke-width="1.8"/>
+    <rect x="392" y="284" width="210" height="24" rx="8" fill="#1f3864"/>
+    <text x="497" y="300" text-anchor="middle" fill="#fff" font-size="13" font-weight="700">document_requests</text>
+    <text x="404" y="324" font-size="11.5" fill="#b45309" font-weight="700">id PK</text>
+    <text x="404" y="341" font-size="11.5" fill="#3b6ea5" font-weight="700">user_id FK → users</text>
+    <text x="404" y="358" font-size="11.5" fill="#3b6ea5" font-weight="700">document_type_id FK</text>
+    <text x="404" y="375" font-size="11.5" fill="#333">purpose · status</text>
+    <text x="404" y="392" font-size="11.5" fill="#333">grade_level · SY (snapshots)</text>
+    <text x="404" y="409" font-size="11.5" fill="#333">date_requested / released</text>
+    <text x="404" y="426" font-size="11.5" fill="#333">id_photo · e_certificate</text>
+  </g>
+
+  <!-- ═ document_types ═ -->
+  <g>
+    <rect x="738" y="300" width="204" height="122" rx="8" fill="#fff" stroke="#1f3864" stroke-width="1.6"/>
+    <rect x="738" y="300" width="204" height="24" rx="8" fill="#1f3864"/>
+    <text x="840" y="316" text-anchor="middle" fill="#fff" font-size="13" font-weight="700">document_types</text>
+    <text x="750" y="340" font-size="11.5" fill="#b45309" font-weight="700">id PK</text>
+    <text x="750" y="357" font-size="11.5" fill="#333">name UK (Good Moral…)</text>
+    <text x="750" y="374" font-size="11.5" fill="#333">requires_grade_level</text>
+    <text x="750" y="391" font-size="11.5" fill="#333">is_active · sort_order</text>
+    <text x="750" y="410" font-size="10.5" fill="#777">admin-managed catalog</text>
+  </g>
+
+  <!-- ═ credential_resend_log ═ -->
+  <g>
+    <rect x="392" y="516" width="210" height="80" rx="8" fill="#fff" stroke="#8a8a8a" stroke-width="1.4"/>
+    <rect x="392" y="516" width="210" height="24" rx="8" fill="#8a8a8a"/>
+    <text x="497" y="532" text-anchor="middle" fill="#fff" font-size="13" font-weight="700">credential_resend_log</text>
+    <text x="404" y="556" font-size="11.5" fill="#b45309" font-weight="700">id PK</text>
+    <text x="404" y="573" font-size="11.5" fill="#333">email · requested_at (rate-limit)</text>
+  </g>
+
+  <!-- ═ site_settings ═ -->
+  <g>
+    <rect x="738" y="516" width="204" height="80" rx="8" fill="#fff" stroke="#8a8a8a" stroke-width="1.4"/>
+    <rect x="738" y="516" width="204" height="24" rx="8" fill="#8a8a8a"/>
+    <text x="840" y="532" text-anchor="middle" fill="#fff" font-size="13" font-weight="700">site_settings</text>
+    <text x="750" y="556" font-size="11.5" fill="#b45309" font-weight="700">setting_key PK</text>
+    <text x="750" y="573" font-size="11.5" fill="#333">setting_value (branding)</text>
+  </g>
+</svg>
+
+<div class="callout"><b>Result:</b> 3 relationships → <b>6 enforced FKs</b>, zero orphan tables,
+every table in 1NF · 2NF · 3NF. Deliberate exceptions (audit snapshots, request-time
+snapshots, soft email ref) are documented design decisions, not oversights.</div>
+</div>
+
+<div class="card">
+<h2>Beyond 3NF — the decisions panelists ask about</h2>
+<ul>
+<li><b>1:1 <code>student_profiles</code> split</b> — LRN/Grade/SY apply only to students;
+staff rows carry no NULL academic columns.</li>
+<li><b>Audit &amp; request snapshots kept denormalized</b> — an append-only trail must
+show values <i>as they were at event/request time</i>, surviving renames and deletions.</li>
+<li><b><code>credential_resend_log</code> soft reference</b> — disposable abuse-protection
+data; not business data.</li>
+</ul>
+<p class="note">Detailed text version: <code>database/normalization.md</code> ·
+Auto-generated ERD: <code>database/erd.html</code></p>
+</div>
+
+</div>
+</body>
+</html>

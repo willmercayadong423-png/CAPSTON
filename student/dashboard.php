@@ -142,8 +142,8 @@ $updateSuccess = "";
 $updateError   = "";
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_account'])) {
-    $new_email   = trim($_POST['email']);
-    $new_contact = trim($_POST['contact']);
+    $new_email   = trim($_POST['email'] ?? '');
+    $new_contact = trim($_POST['contact'] ?? '');
 
     if (!verifyCsrf()) {
         $updateError = "Your session expired. Please try again.";
@@ -173,14 +173,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_account'])) {
             } elseif ($changePw && $newPass === '') {
                 // current password typed but new left empty
                 $updateError = "Please enter your new password.";
-            } elseif ($changePw && strlen($newPass) < 5) {
-                $updateError = "New password must be at least 5 characters.";
+            } elseif ($changePw && strlen($newPass) < 8) {
+                $updateError = "New password must be at least 8 characters.";
             }
 
             $new_photo = $student['profile_photo'] ?? null;
 
-           
-if (isset($_FILES['profile_photo']) && $_FILES['profile_photo']['error'] === UPLOAD_ERR_OK) {
+            // ── Student-editable profile fields ────────────────────────
+            // The combined Name display / Student ID / LRN stay read-only
+            // (registrar-managed); First & Last name, Grade Level and Last
+            // School Year Attended are editable on the account.
+            // VALIDATED BEFORE the photo upload below — the upload used to
+            // persist first and then get rejected by these checks, leaving
+            // an orphaned photo file on disk that nothing referenced.
+            $new_first_name = db_utf8(trim($_POST['first_name'] ?? ''));
+            $new_last_name  = db_utf8(trim($_POST['last_name'] ?? ''));
+            $new_grade      = db_utf8(trim($_POST['grade_level'] ?? ''));
+            $new_sy         = db_utf8(trim($_POST['school_year_last_attended'] ?? ''));
+
+            /* ── Validate (HTML "required" is bypassable — enforce server-side).
+               db_utf8() above strips invalid UTF-8 bytes so a stray bad byte
+               can't abort the UPDATE with an uncaught mysqli exception. ── */
+            if ($new_first_name === '' || $new_last_name === '') {
+                $updateError = "First and last name are required.";
+            } elseif (mb_strlen($new_first_name) > 100 || mb_strlen($new_last_name) > 100) {
+                $updateError = "First and last name must be 100 characters or fewer.";
+            } elseif (mb_strlen($new_grade) > 20) {
+                $updateError = "Grade level must be 20 characters or fewer.";
+            } elseif (mb_strlen($new_sy) > 20) {
+                $updateError = "School year must be 20 characters or fewer.";
+            }
+
+            if (empty($updateError) && isset($_FILES['profile_photo']) && $_FILES['profile_photo']['error'] === UPLOAD_ERR_OK) {
                 $img_allowed_mime = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
                 $img_allowed_ext  = ['jpg', 'jpeg', 'png', 'gif', 'webp'];
                 $img_type = mime_content_type($_FILES['profile_photo']['tmp_name']);
@@ -199,10 +223,9 @@ if (isset($_FILES['profile_photo']) && $_FILES['profile_photo']['error'] === UPL
                     $photo_fn   = 'student_' . $student_id . '_' . time() . '_' . rand(100, 999) . '.' . $img_ext;
                     $photo_dest = $uploads_web . '/profile_photos/' . $photo_fn;
                     if (move_uploaded_file($_FILES['profile_photo']['tmp_name'], $photo_fs_dir . $photo_fn)) {
-                        $old = $uploads_fs . '/' . ltrim($student['profile_photo'], '/');
-                        if (!empty($student['profile_photo']) && file_exists($old)) {
-                            unlink($old);
-                        }
+                        // NOTE: the PREVIOUS photo file is deleted only after the
+                        // DB update succeeds (below). Deleting it here would leave
+                        // a dangling DB path if a later validation fails.
                         $new_photo = $photo_dest;
                     } else {
                         $updateError = "Failed to save profile photo. Please try again.";
@@ -216,28 +239,6 @@ if (isset($_FILES['profile_photo']) && $_FILES['profile_photo']['error'] === UPL
 
 
             if (empty($updateError)) {
-    // ── Student-editable profile fields ────────────────────────────
-    // The combined Name display / Student ID / LRN stay read-only
-    // (registrar-managed); First & Last name, Grade Level and Last
-    // School Year Attended are editable on the account.
-    $new_first_name = trim($_POST['first_name'] ?? '');
-    $new_last_name  = trim($_POST['last_name'] ?? '');
-    $new_grade      = trim($_POST['grade_level'] ?? '');
-    $new_sy         = trim($_POST['school_year_last_attended'] ?? '');
-
-    /* ── Validate (HTML "required" is bypassable — enforce server-side) ── */
-    if ($new_first_name === '' || $new_last_name === '') {
-        $updateError = "First and last name are required.";
-    } elseif (mb_strlen($new_first_name) > 100 || mb_strlen($new_last_name) > 100) {
-        $updateError = "First and last name must be 100 characters or fewer.";
-    } elseif (mb_strlen($new_grade) > 20) {
-        $updateError = "Grade level must be 20 characters or fewer.";
-    } elseif (mb_strlen($new_sy) > 20) {
-        $updateError = "School year must be 20 characters or fewer.";
-    }
-}
-
-if (empty($updateError)) {
     $newGradeSql = ($new_grade !== '') ? $new_grade : null;   // bind_param needs variables
     $newSySql    = ($new_sy    !== '') ? $new_sy    : null;
     $upd = $conn->prepare("UPDATE users
@@ -245,7 +246,7 @@ if (empty($updateError)) {
             first_name=?, last_name=?
         WHERE id=?");
     $upd->bind_param(
-        "ssssssi",
+        "sssssi",
         $new_email, $new_contact, $new_photo,
         $new_first_name, $new_last_name,
         $student_id
@@ -257,12 +258,19 @@ if (empty($updateError)) {
         VALUES (?, ?, ?)
         ON DUPLICATE KEY UPDATE
             grade_level               = COALESCE(VALUES(grade_level), grade_level),
-            school_year_last_attended = VALUES(school_year_last_attended)
+            school_year_last_attended = COALESCE(VALUES(school_year_last_attended), school_year_last_attended)
     ");
     $updProfile->bind_param("iss", $student_id, $newGradeSql, $newSySql);
                 if ($upd->execute()) {
                     $updProfile->execute();
                     $updProfile->close();
+
+                    // ── Remove the previous photo only now that the DB points at the new one ──
+                    $oldPhoto = (string)($student['profile_photo'] ?? '');
+                    if ($oldPhoto !== '' && $new_photo !== $oldPhoto) {
+                        $oldFs = $uploads_fs . '/' . ltrim($oldPhoto, '/');
+                        if (file_exists($oldFs)) unlink($oldFs);
+                    }
                     // ── Apply the optional password change ──
                     if ($changePw && $newPass !== '') {
                         $hash = password_hash($newPass, PASSWORD_DEFAULT);
@@ -305,8 +313,14 @@ if (empty($updateError)) {
 }
 
 // ── Handle: Cancel request ─────────────────────────────────────────
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['cancel_request']) && verifyCsrf()) {
-    $req_id = (int)$_POST['req_id'];
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['cancel_request'])) {
+    // CSRF failure must be VISIBLE — a silent no-op made users believe
+    // the cancel worked (every other flow redirects with ?error=…).
+    if (!verifyCsrf()) {
+        header("Location: dashboard.php?view=requests&error=csrf_fail");
+        exit();
+    }
+    $req_id = (int)($_POST['req_id'] ?? 0);
     $cancel = $conn->prepare(
         "UPDATE document_requests
          SET status = 'Cancelled', cancelled_by = 'student'
@@ -314,13 +328,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['cancel_request']) && 
     );
     $cancel->bind_param("ii", $req_id, $student_id);
     $cancel->execute();
-    if ($cancel->affected_rows > 0) {
+    $cancelled = $cancel->affected_rows > 0;
+    if ($cancelled) {
         audit_log($conn, 'REQUEST_CANCELLED', 'document_request',
             'REQ-' . str_pad((string)$req_id, 4, '0', STR_PAD_LEFT),
             "Request cancelled by student");
     }
     $cancel->close();
-    header("Location: dashboard.php?view=requests&tab=archived");
+    // Only a REAL cancel lands on the archive tab — anything else
+    // (cross-user id, already-processed row) gets an explanatory flash
+    // instead of a misleading success view.
+    header("Location: dashboard.php?view=requests" . ($cancelled ? "&tab=archived" : "&error=cancel_failed"));
     exit();
 }
 
@@ -331,11 +349,11 @@ $successMsg = isset($_GET['restore_success']) ? "Request restored to active."   
 $errorMsg   = "";
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_request'])) {
-    $doc_type = trim($_POST['document_type']);
-    $purpose  = trim($_POST['purpose'] ?? '');
+    $doc_type = db_utf8(trim($_POST['document_type'] ?? ''));
+    $purpose  = db_utf8(trim($_POST['purpose'] ?? ''));
     if ($purpose === 'Other') {
         // "Other — please specify" → use the free-text detail
-        $purpose = trim($_POST['purpose_other'] ?? '');
+        $purpose = db_utf8(trim($_POST['purpose_other'] ?? ''));
     }
     $syInput  = trim($_POST['school_year_last_attended'] ?? '');
     $glInput  = trim($_POST['grade_level'] ?? '');
@@ -554,6 +572,7 @@ if (empty($errorMsg) && isset($_GET['error'])) {
         'gl_invalid'       => 'Please select a valid Grade Level.',
         'purpose_invalid'  => 'Please select a purpose (or specify it under Other).',
         'not_found'        => 'That request can no longer be edited — it may have already been processed.',
+        'cancel_failed'    => 'That request could not be cancelled — it may have already been processed or no longer belongs to you.',
         'db_fail'          => 'Something went wrong. Please try again.',
         default            => 'An error occurred. Please try again.',
     };
@@ -754,9 +773,10 @@ if (!in_array($activeView, ['dashboard', 'requests', 'request', 'notifications',
 }
 $activeTab      = $_GET['tab']  ?? 'main';
 $profilePhoto   = !empty($student['profile_photo']) ? $student['profile_photo'] : null;
-// DB paths are web-root-relative ("uploads/..."); this page sits one level
-// deeper, so rendered src attributes need the "../" prefix.
-$profilePhotoUrl = $profilePhoto ? '../' . $profilePhoto : null;
+// Photos are blocked from direct /uploads/ access — the ONLY way to view
+// one is the authenticated endpoint (serves the logged-in student's own
+// photo by default).
+$profilePhotoUrl = $profilePhoto ? '../phpLogics/download_profile.php' : null;
 $avatarInitials = strtoupper(substr($student['first_name'], 0, 1) . substr($student['last_name'], 0, 1));
 ?>
 <!DOCTYPE html>
@@ -765,7 +785,8 @@ $avatarInitials = strtoupper(substr($student['first_name'], 0, 1) . substr($stud
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Student Portal — HEHMS</title>
+    <link rel="icon" type="image/png" href="../assets/img/Logo.png">
+    <title>Student Portal — HEHMHS</title>
     <script>
         // One-time cleanup: dark mode has been removed, but some browsers
         // may still have 'hehms-theme: dark' saved from before. Clear it
@@ -775,9 +796,9 @@ $avatarInitials = strtoupper(substr($student['first_name'], 0, 1) . substr($stud
     </script>
     <link rel="stylesheet" href="portal.css?v=2">
     <?php echo theme_head(); // admin-managed brand color ?>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- Fonts are SELF-HOSTED (assets/fonts) — the page looks identical even offline.
+         (Google-hosted fonts used to make the whole site look broken without internet.) -->
+    <link rel="stylesheet" href="../assets/fonts/inter.css">
 </head>
 
 <body>
@@ -1442,7 +1463,7 @@ $avatarInitials = strtoupper(substr($student['first_name'], 0, 1) . substr($stud
                             <input type="password" name="current_password" autocomplete="current-password">
                         </div>
                         <div class="acct-form-group">
-                            <label>New Password <span class="hint-inline">(min. 5 characters)</span></label>
+                            <label>New Password <span class="hint-inline">(min. 8 characters)</span></label>
                             <input type="password" name="new_password" autocomplete="new-password">
                         </div>
                     </div>
@@ -1549,7 +1570,7 @@ $avatarInitials = strtoupper(substr($student['first_name'], 0, 1) . substr($stud
 
     <footer class="footer">
         <div class="footer-inner">
-            <img class="footer-logo" src="<?php echo site_logo_url(); ?>" alt="HEHMS logo">
+            <img class="footer-logo" src="<?php echo site_logo_url(); ?>" alt="HEHMHS logo">
             <div class="footer-name">Hilario E. Hermosa Memorial High School</div>
             <div>© <?php echo date('Y'); ?> · Credential Request &amp; Tracking System</div>
         </div>
@@ -1710,6 +1731,7 @@ $avatarInitials = strtoupper(substr($student['first_name'], 0, 1) . substr($stud
     <script>window.ACTIVE_DOC_TYPES = <?php echo json_encode($activeDocTypes, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;</script>
     <script src="../assets/js/icons.js?v=2"></script>
     <script src="dashb.js?v=2"></script>
+    <script src="../assets/js/offline-guard.js" defer></script>
     <script src="../assets/js/session-timeout.js" defer></script>
     <script>
         <?php if ($errorMsg): ?>showView('request');

@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════
-   HEHMS — Registrar JS  (registrarJS.js)
+   HEHMHS — Registrar JS  (registrarJS.js)
    ═══════════════════════════════════════════════════ */
 
 document.addEventListener('DOMContentLoaded', function () {
@@ -311,13 +311,15 @@ function openRequestModal(btn) {
     document.getElementById('ms-status-wrap').innerHTML =
         statusBadgeHtml(d.status || '', d.cancelled || '');
 
-    /* Avatar — photo if present, initials as fallback underneath */
+    /* Avatar — photo if present, initials as fallback underneath.
+       Photos are served through the authenticated endpoint (never a
+       direct /uploads/ URL). */
     var av = document.getElementById('ms-avatar');
     av.innerHTML = '';
     av.textContent = initialsOf(d.student || '');
-    if (d.avatar) {
+    if (d.avatar && d.avatarUser) {
         var img = document.createElement('img');
-        img.src = '../' + d.avatar;   // DB stores web-root-relative paths
+        img.src = '../phpLogics/download_profile.php?user_id=' + encodeURIComponent(d.avatarUser);
         img.alt = '';
         img.onerror = function () { img.remove(); };   // reveal initials again
         av.appendChild(img);
@@ -763,6 +765,10 @@ document.addEventListener('DOMContentLoaded', function () {
             // A password change must be authorized by the CURRENT password
             if (password && !currentPw) {
                 showToast('Please enter your current password to set a new one.', 'error');
+                return;
+            }
+            if (password && password.length < 8) {
+                showToast('New password must be at least 8 characters.', 'error');
                 return;
             }
 

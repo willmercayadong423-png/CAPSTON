@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════════════
-   HEHMS — Admin CSS  (admin.css)
+   HEHMHS — Admin CSS  (admin.css)
    ───────────────────────────────────────────────────────────────
    ADMIN-ONLY COMPONENT LAYER. Loads after:
      1. ../student/portal.css      — shared design system
@@ -473,3 +473,122 @@ tr.view-alumni:hover { opacity: 1; }
 
 /* Accounts row dropdown (⋮) label */
 .btn-label { margin-left: 4px; }
+
+/* ═══════════════════════════════════════════════════
+   ACCOUNT INFORMATION MODAL (Accounts → click a row)
+   ═══════════════════════════════════════════════════ */
+
+/* Account rows are clickable → hint it */
+#records-tbody tr:not(.no-results-row) { cursor: pointer; }
+#records-tbody tr:not(.no-results-row):hover { background: rgba(107, 143, 58, 0.06); }
+
+/* ── Identity header ── */
+.ai-head {
+    display: flex; align-items: center; gap: 16px;
+    padding-bottom: 16px; margin-bottom: 6px;
+    border-bottom: 1px solid var(--line, #e5e7eb);
+}
+.ai-avatar {
+    width: 62px; height: 62px; border-radius: 50%;
+    overflow: hidden; flex: 0 0 62px;
+    display: inline-flex; align-items: center; justify-content: center;
+    background: var(--green-pale, #eef4e6); color: var(--green-dark, #4a6741);
+    font-weight: 700; font-size: 1.35rem;
+    border: 2px solid var(--gold, #c9a84c);
+}
+.ai-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.ai-avatar-fallback { display: inline-flex; }
+.ai-head-main { min-width: 0; }
+.ai-head-name {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    font-size: 1.15rem; font-weight: 700; color: #1f2937;
+}
+.ai-head-sub { font-size: .82rem; color: #6b7280; margin-top: 3px; }
+
+/* ── Info grid ── */
+.ai-info-grid {
+    display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px 14px; margin: 10px 0 4px;
+}
+@media (max-width: 720px) { .ai-info-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 480px) { .ai-info-grid { grid-template-columns: 1fr; } }
+.ai-info-cell {
+    background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 10px;
+    padding: 9px 12px; min-width: 0;
+}
+.ai-info-label {
+    display: block; font-size: .68rem; text-transform: uppercase;
+    letter-spacing: .04em; color: #6b7280; margin-bottom: 3px;
+}
+.ai-info-value {
+    display: block; font-size: .88rem; font-weight: 600; color: #1f2937;
+    overflow-wrap: anywhere;
+}
+
+/* ── Status summary chips ── */
+.ai-counts { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 14px; }
+.ai-chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: .76rem; color: #4b5563;
+    background: #f3f4f6; border: 1px solid #e5e7eb;
+    padding: 4px 12px; border-radius: 999px;
+}
+.ai-chip strong { font-size: .85rem; color: #1f2937; }
+.ai-chip.ai-pending    { background: #fef9c3; border-color: #fde047; color: #854d0e; }
+.ai-chip.ai-pending strong    { color: #713f12; }
+.ai-chip.ai-processing { background: #dbeafe; border-color: #93c5fd; color: #1d4ed8; }
+.ai-chip.ai-processing strong { color: #1e3a8a; }
+.ai-chip.ai-released   { background: #dcfce7; border-color: #86efac; color: #15803d; }
+.ai-chip.ai-released strong   { color: #14532d; }
+.ai-chip.ai-rejected   { background: #fee2e2; border-color: #fca5a5; color: #b91c1c; }
+.ai-chip.ai-rejected strong   { color: #7f1d1d; }
+.ai-chip.ai-cancelled  { background: #f3f4f6; border-color: #d1d5db; color: #6b7280; }
+.ai-chip.ai-cancelled strong  { color: #374151; }
+
+/* ── Requests table ── */
+.ai-req-wrap { overflow-x: auto; border: 1px solid #e5e7eb; border-radius: 10px; }
+.ai-req-table { width: 100%; border-collapse: collapse; font-size: .82rem; min-width: 640px; }
+.ai-req-table th {
+    text-align: left; padding: 9px 12px; background: #f3f4f6;
+    color: #374151; font-size: .7rem; text-transform: uppercase; letter-spacing: .05em;
+    border-bottom: 1px solid #e5e7eb; white-space: nowrap;
+}
+.ai-req-table td { padding: 10px 12px; border-bottom: 1px solid #f3f4f6; vertical-align: top; color: #374151; }
+.ai-req-table tr:last-child td { border-bottom: none; }
+.ai-purpose {
+    font-size: .72rem; color: #6b7280; margin-top: 3px;
+    max-width: 260px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.ai-reject-reason {
+    font-size: .72rem; color: #b91c1c; margin-top: 4px;
+    display: flex; align-items: flex-start; gap: 4px;
+}
+.ai-file-link {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: .74rem; font-weight: 600; color: var(--green-dark, #4a6741);
+    text-decoration: none; margin-right: 8px; white-space: nowrap;
+}
+.ai-file-link:hover { text-decoration: underline; }
+.ai-file-none { color: #9ca3af; }
+
+/* ═══════════════════════════════════════════════════
+   ACCOUNTS PAGINATION (10 per page)
+   ═══════════════════════════════════════════════════ */
+.accounts-pager {
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+    flex-wrap: wrap; padding: 14px 4px 4px;
+}
+.accounts-pager:empty { display: none; }
+.ap-info { font-size: .78rem; color: #6b7280; margin-right: 10px; }
+.ap-info strong { color: var(--green-dark, #4a6741); }
+.ap-btn {
+    min-width: 34px; height: 34px; padding: 0 10px;
+    display: inline-flex; align-items: center; justify-content: center;
+    background: #fff; border: 1px solid #d8d3c2; border-radius: 9px;
+    font-size: .8rem; font-weight: 700; color: #4b5563; cursor: pointer;
+    transition: all .12s ease;
+}
+.ap-btn:hover:not(:disabled) { border-color: var(--green-mid, #6b8f3a); color: var(--green-dark, #4a6741); background: #f6f9f0; }
+.ap-btn.active { background: linear-gradient(135deg, var(--green-mid, #6b8f3a), var(--green-dark, #4a6741)); color: #fff; border-color: transparent; }
+.ap-btn:disabled { opacity: .38; cursor: not-allowed; }
+.ap-gap { color: #9ca3af; padding: 0 2px; font-size: .8rem; }

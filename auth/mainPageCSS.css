@@ -297,8 +297,8 @@
             border: none;
             border-bottom: 1px solid var(--hairline);
             background: transparent;
-            padding: 8px 2px 9px;
-            font-size: 15px;
+            padding: 12px 2px 13px;
+            font-size: 16px;
             color: var(--ink);
             outline: none;
             transition: border-color 0.2s ease, box-shadow 0.2s ease;
@@ -318,18 +318,23 @@
         }
 
         .field--password input {
-            padding-right: 30px;
+            padding-right: 34px;
         }
 
         .password-toggle {
             position: absolute;
-            right: 0;
-            bottom: 9px;
+            right: -10px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 44px;
+            height: 44px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
             border: none;
             background: transparent;
             cursor: pointer;
             font-size: 15px;
-            padding: 0;
             opacity: 0.5;
             transition: opacity 0.2s ease;
         }
@@ -380,6 +385,8 @@
             font-weight: 600;
             border-bottom: 1px solid transparent;
             transition: border-color 0.2s ease;
+            display: inline-block;
+            padding: 6px 0;
         }
 
         .forgot a:hover {
@@ -423,12 +430,22 @@
                 grid-template-columns: 1fr;
             }
 
+            /* Hero: the marketing content used to be position:absolute at the
+               panel's bottom — taller than the 52vh panel on phones, so the
+               headline was clipped away by overflow:hidden. Let the panel
+               size to its content instead: nothing is ever cut off.
+               position:relative (NOT static) keeps z-index working — static
+               content paints BELOW the absolutely-positioned slide photos,
+               which covered the text the moment the images loaded. */
             .photo-panel {
-                min-height: 52vh;
+                min-height: 0;
             }
 
             .photo-panel__content {
-                padding: 0 28px 64px;
+                position: relative;
+                z-index: 5;                 /* above slides (1–2) + scrim (3) */
+                max-width: none;
+                padding: 118px 28px 48px;   /* top clearance for the letterhead */
             }
 
             .letterhead {
@@ -440,12 +457,22 @@
             }
 
             .info-row__item {
-                padding: 0 16px;
+                padding: 14px 16px;
             }
 
-            .slide-meta,
+            /* caption + dots were anchored for the old 100vh hero */
+            .slide-meta { display: none; }
+
             .slide-dots {
                 right: 28px;
+                bottom: 16px;
+            }
+
+            /* Pills instead of 2px hairline bars — actually tappable on touch */
+            .dot {
+                width: 28px;
+                height: 14px;
+                border-radius: 7px;
             }
 
             .login-panel {
@@ -456,12 +483,115 @@
         }
 
         @media (max-width: 560px) {
-            .photo-panel__content h1 {
-                font-size: 28px;
+            .photo-panel__content {
+                padding-top: 104px;
+                padding-bottom: 36px;
             }
 
+            .photo-panel__content h1 {
+                font-size: 28px;
+                margin-bottom: 14px;
+            }
+
+            .photo-panel__content .lead {
+                font-size: 14.5px;
+                margin-bottom: 18px;
+            }
+
+            /* Marketing cards: keep all three on phones, but compact —
+               titles only in one tight row, so the hero stays short and
+               the sign-in form is still one small scroll away. (The full
+               card descriptions remain on tablet/desktop.) */
             .info-row {
-                grid-template-columns: 1fr;
+                grid-template-columns: repeat(3, minmax(0, 1fr));
+                gap: 8px;
+            }
+
+            .info-row__item {
+                padding: 10px 10px 11px;
+                gap: 3px;
+                text-align: center;
+                align-items: center;
+            }
+
+            .info-row__item strong {
+                font-size: 11.5px;
+                line-height: 1.35;
+            }
+
+            .info-row__item span {
+                display: none;
+            }
+        }
+
+        /* Landscape phones: very little height — trim the hero but KEEP the
+           three info cards visible (compact, titles only) so the marketing
+           row is never lost in any orientation. */
+        @media (max-height: 500px) {
+            .photo-panel__content {
+                padding: 86px 28px 30px;
+            }
+
+            .photo-panel__content .lead {
+                display: none;
+            }
+
+            /* compact cards row — same as ≤560px, since the full-width
+               descriptions are too tall for a short landscape screen */
+            .info-row {
+                grid-template-columns: repeat(3, minmax(0, 1fr));
+                gap: 8px;
+            }
+
+            .info-row__item {
+                padding: 8px 8px 9px;
+                gap: 3px;
+                text-align: center;
+                align-items: center;
+            }
+
+            .info-row__item strong {
+                font-size: 11.5px;
+                line-height: 1.35;
+            }
+
+            .info-row__item span {
+                display: none;
+            }
+
+            .letterhead {
+                padding: 12px 24px;
+            }
+
+            .slide-dots {
+                bottom: 8px;
+            }
+
+            /* Compress the sign-in branding so the FORM starts in view */
+            .login-panel {
+                padding: 20px 28px 28px;
+            }
+
+            .crest-mark {
+                width: 40px;
+                height: 40px;
+                margin-bottom: 10px;
+            }
+
+            .school-name {
+                font-size: 17px;
+            }
+
+            .rule {
+                margin: 10px auto 12px;
+            }
+
+            .panel-footer {
+                margin-top: 18px;
+                padding-top: 12px;
             }
         }
 .svgic { display: inline-block; vertical-align: -.18em; flex-shrink: 0; }
+
+/* Inputs are 16px in the base .field rule — ≥16px at every size keeps
+   iOS Safari from auto-zooming on focus (portrait AND landscape). */

@@ -1,6 +1,6 @@
 <?php
 /* ═══════════════════════════════════════════════════════════════════
- * HEHMS — ERD generator  (database/generate_erd.php)
+ * HEHMHS — ERD generator  (database/generate_erd.php)
  * ───────────────────────────────────────────────────────────────────
  * Reads the LIVE database and produces database/erd.html — a
  * print-ready Entity-Relationship Diagram for presentations.
@@ -110,7 +110,7 @@ $html = '<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>HEHMS — Entity Relationship Diagram</title>
+<title>HEHMHS — Entity Relationship Diagram</title>
 <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: "Segoe UI", Arial, sans-serif; background: #f4f6f0; color: #1a2409; padding: 36px; }
@@ -150,7 +150,7 @@ $html = '<!DOCTYPE html>
 </style>
 </head>
 <body>
-    <h1>HEHMS Credential Request &amp; Tracking System — <span>Entity Relationship Diagram</span></h1>
+    <h1>HEHMHS Credential Request &amp; Tracking System — <span>Entity Relationship Diagram</span></h1>
     <div class="sub">Hilario E. Hermosa Memorial High School · database <code>hehms</code> · generated ' . date('M j, Y') . ' from the live schema (database/generate_erd.php)</div>
 
     <div class="grid">' . $cards . '</div>

@@ -23,14 +23,14 @@ if (!isset($_POST['csrf_token']) || !hash_equals($_SESSION['csrf_token'] ?? '', 
 
 $student_id = (int)$_SESSION['user_id'];
 $req_id     = (int)($_POST['req_id'] ?? 0);
-$doc_type   = trim($_POST['document_type'] ?? '');
-$purpose    = trim($_POST['purpose'] ?? '');
+$doc_type   = db_utf8(trim($_POST['document_type'] ?? ''));
+$purpose    = db_utf8(trim($_POST['purpose'] ?? ''));
 if ($purpose === 'Other') {
     // "Other — please specify" → use the free-text detail
-    $purpose = trim($_POST['purpose_other'] ?? '');
+    $purpose = db_utf8(trim($_POST['purpose_other'] ?? ''));
 }
-$syInput    = trim($_POST['school_year_last_attended'] ?? '');
-$glInput    = trim($_POST['grade_level'] ?? '');
+$syInput    = db_utf8(trim($_POST['school_year_last_attended'] ?? ''));
+$glInput    = db_utf8(trim($_POST['grade_level'] ?? ''));
 
 // Every request needs the SY; the Grade Level requirement is per document
 // type (document_types.requires_grade_level — admin-managed).

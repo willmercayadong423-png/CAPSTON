@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>1NF — First Normal Form · HEHMHS</title>
+<style>
+  :root { --navy:#1f3864; --red:#b3261e; --amber:#b45309; --line:#d5dbe5; }
+  * { box-sizing:border-box; margin:0; }
+  body { font-family:'Segoe UI', Arial, sans-serif; background:#20242c; display:flex;
+         justify-content:center; padding:20px; }
+  .slide { background:#fff; width:1180px; border-radius:14px; padding:34px 40px 28px; }
+  .kicker { color:var(--amber); font-weight:800; letter-spacing:2px; font-size:13px; }
+  h1 { color:var(--navy); font-size:30px; margin:2px 0 4px; }
+  .rule { background:#eef3ea; border-left:5px solid #4a6741; padding:8px 14px; border-radius:0 8px 8px 0;
+          font-size:15px; margin-bottom:18px; }
+  table.grid { border-collapse:collapse; font-size:13.5px; width:100%; }
+  .grid th { background:var(--navy); color:#fff; padding:8px 10px; border:1px solid #35507e; text-align:left; }
+  .grid td { border:1px solid var(--line); padding:7px 10px; }
+  td.pk, th.pk { background:#fff3cd !important; font-weight:800; }
+  td.dup  { background:#fde8e8 !important; }
+  td.dup2 { background:#fce9fb !important; }
+  .badge { font-size:10.5px; padding:1px 7px; border-radius:8px; color:#fff; vertical-align:1px; }
+  .badge.pk { background:var(--amber); }
+  .marker { font-size:11px; color:var(--red); font-weight:700; display:block; }
+  .legend { display:flex; gap:16px; font-size:12.5px; margin:10px 0 18px; color:#444; }
+  .sw { width:14px; height:14px; border-radius:3px; border:1px solid #bbb; display:inline-block;
+        margin-right:5px; vertical-align:-2px; }
+  .bottom { display:flex; gap:18px; margin-top:16px; }
+  .panel { flex:1; border-radius:10px; padding:12px 18px; font-size:14px; }
+  .panel.ok  { background:#e7f0e3; border:1px solid #bcd4b2; }
+  .panel.bad { background:#fdeeee; border:1px solid #f2c4c4; }
+  .panel h3 { font-size:13.5px; margin-bottom:6px; letter-spacing:.5px; }
+  .panel.ok h3 { color:#3c5a35; } .panel.bad h3 { color:var(--red); }
+  .panel li { margin:3px 0 3px 20px; }
+  .verdict { margin-top:16px; display:flex; align-items:center; gap:10px; font-size:15px; }
+  .verdict .p { background:#4a6741; color:#fff; font-weight:800; border-radius:8px; padding:4px 14px; }
+  .verdict .n { background:var(--red); color:#fff; font-weight:800; border-radius:8px; padding:4px 14px; }
+</style>
+</head>
+<body>
+<div class="slide">
+  <div class="kicker">STAGE 2 OF 4 · NORMALIZATION</div>
+  <h1>1NF — First Normal Form</h1>
+  <div class="rule"><b>Rules applied:</b> ① every cell holds one <b>atomic</b> value &nbsp;
+    ② the repeating group is <b>flattened</b> — one row per request &nbsp;
+    ③ every row is unique — <b>RequestNo</b> becomes the primary key.</div>
+
+  <table class="grid">
+    <tr>
+      <th class="pk">RequestNo<br><span class="badge pk">PRIMARY KEY</span></th>
+      <th>StudentID</th><th>Name</th><th>Email</th><th>LRN</th>
+      <th>GradeLevel</th><th>RoleName</th>
+      <th>DocName</th><th>DocReqGL</th><th>Purpose</th><th>Status</th>
+    </tr>
+    <tr>
+      <td class="pk">0037</td><td>2026-0001</td><td>Willmer Cayadong</td><td>cayadong…@gmail.com</td><td>136125001234</td>
+      <td>Grade 12</td><td class="dup">Student</td><td>Certificate of Enrollment</td><td class="dup2">1</td>
+      <td>Scholarship</td><td>Released</td>
+    </tr>
+    <tr>
+      <td class="pk">0049</td><td>2026-0001</td><td class="dup">Willmer Cayadong</td><td class="dup">cayadong…@gmail.com</td><td class="dup">136125001234</td>
+      <td class="dup">Grade 12</td><td class="dup">Student</td><td>Certificate of Good Moral</td><td class="dup2">0</td>
+      <td>College application</td><td>Pending</td>
+    </tr>
+    <tr>
+      <td class="pk">0050</td><td>2026-0002</td><td>Juan Dela Cruz</td><td>juan@hehms.edu.ph</td><td>123456789012</td>
+      <td>—</td><td class="dup">Student</td><td>Certificate of Good Moral</td><td class="dup2">0</td>
+      <td>Employment</td><td>Pending</td>
+    </tr>
+  </table>
+
+  <div class="legend">
+    <span><span class="sw" style="background:#fff3cd"></span>Primary key</span>
+    <span><span class="sw" style="background:#fde8e8"></span>Student data duplicated on every request row</span>
+    <span><span class="sw" style="background:#fce9fb"></span>Document rule copied as text (“requires Grade Level?”)</span>
+  </div>
+
+  <div class="bottom">
+    <div class="panel ok">
+      <h3>✅ 1NF ACHIEVED</h3>
+      <li>Atomic values — one fact per cell</li>
+      <li>No repeating groups — one row per request</li>
+      <li>Primary key identifies every row</li>
+    </div>
+    <div class="panel bad">
+      <h3>STILL BROKEN — PARTIAL DEPENDENCIES</h3>
+      <li><b>Redundancy:</b> Willmer's name/email/LRN copied on each of his request rows</li>
+      <li><b>Update anomaly:</b> fixing a misspelled email touches many rows</li>
+      <li><b>Insert anomaly:</b> a new student with no request has no row</li>
+      <li><b>Delete anomaly:</b> removing the last request deletes the student</li>
+    </div>
+  </div>
+
+  <div class="verdict"><span class="p">✓ 1NF</span> <span class="n">✗ NOT YET 2NF</span>
+    Next → remove attributes that depend on only <b>part</b> of the key.</div>
+</div>
+</body>
+</html>

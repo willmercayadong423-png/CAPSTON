@@ -1,5 +1,5 @@
 <?php
-/* ── HEHMS — Download an e-certificate attached to a released request ──
+/* ── HEHMHS — Download an e-certificate attached to a released request ──
  * Student-only: the requesting student can re-download their own
  * e-certificate from My Requests → History (it was also emailed to
  * them on release).

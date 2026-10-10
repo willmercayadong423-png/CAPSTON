@@ -1,6 +1,6 @@
 <?php
 /* ═══════════════════════════════════════════════════════════════════
- * HEHMS Month-End Report E-mail  (phpLogics/monthly_report_email.php)
+ * HEHMHS Month-End Report E-mail  (phpLogics/monthly_report_email.php)
  * ───────────────────────────────────────────────────────────────────
  * Automatically e-mails the system-generated Monthly Request Report
  * (PDF) to every ACTIVE Registrar and Admin account once a month, so
@@ -117,8 +117,8 @@ function send_monthly_report_emails(mysqli $conn, string $month): array
     }
     $stats = $report['stats'];
 
-    $subject   = "Monthly Request Report — {$label} — HEHMS";
-    $attName   = "HEHMS_Monthly_Report_{$month}.pdf";
+    $subject   = "Monthly Request Report — {$label} — HEHMHS";
+    $attName   = "HEHMHS_Monthly_Report_{$month}.pdf";
 
     $sent    = 0;
     $lastErr = null;
@@ -147,8 +147,8 @@ function send_monthly_report_emails(mysqli $conn, string $month): array
                   . "requesting students, and all documents released. You can also export any month on demand from "
                   . "your dashboard's <strong>Reports</strong> section.</p>";
 
-            $mail->Body    = mailer_template('HEHMS Monthly Report', $greeting . $body);
-            $mail->AltBody = "HEHMS Monthly Request Report for {$label}: "
+            $mail->Body    = mailer_template('HEHMHS Monthly Report', $greeting . $body);
+            $mail->AltBody = "HEHMHS Monthly Request Report for {$label}: "
                 . "{$stats['submitted']} submitted, {$stats['released']} released, "
                 . "{$stats['rejected']} rejected, {$stats['cancelled']} cancelled. "
                 . "Full PDF report attached.";

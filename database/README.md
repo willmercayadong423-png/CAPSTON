@@ -25,7 +25,7 @@ Everything the panel needs for the database side of your system.
 
 ## Schema highlights (talking points for the panel)
 
-- **7 tables, fully normalized** — `users` (role-based accounts), `document_requests`, `document_types` (admin-managed requestable docs), `announcements`, `site_settings`, `credential_resend_log`, `audit_logs` (append-only trail).
+- **9 tables, fully normalized** — `users` (role-based accounts) + `roles`, `student_profiles`, `document_requests`, `document_types` (admin-managed requestable docs), `announcements`, `site_settings`, `credential_resend_log`, `audit_logs` (append-only trail).
 - **InnoDB + enforced foreign keys** — referential integrity (deleting a student cascades to their requests; deleting an announcement author sets NULL).
 - **utf8mb4 everywhere** — correct storage of Filipino names (ñ, é).
 - **bcrypt-only passwords** — `password_hash()` / `password_verify()`, no plaintext anywhere.

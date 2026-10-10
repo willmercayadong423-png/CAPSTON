@@ -1,6 +1,6 @@
 <?php
 /* ═══════════════════════════════════════════════════════════════════
-   HEHMS — Report month chooser  (phpLogics/report_menu.php)
+   HEHMHS — Report month chooser  (phpLogics/report_menu.php)
    ───────────────────────────────────────────────────────────────────
    Renders the "Report PDF" split button used on the Registrar AND
    Admin dashboards: click → small menu with exactly two options —

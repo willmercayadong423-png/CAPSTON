@@ -159,6 +159,49 @@ CREATE TABLE `users` (
   CONSTRAINT `fk_users_role` FOREIGN KEY (`role_id`) REFERENCES `roles` (`role_id`) ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='User accounts for every role (students, registrar, admin).';
 /*!40101 SET character_set_client = @saved_cs_client */;
+
+-- ── Seed data ──────────────────────────────────────────────
+-- Roles (fixed ids referenced by users.role_id)
+INSERT INTO `roles` (`role_id`, `role_name`) VALUES
+(1, 'Student'),
+(2, 'Registrar'),
+(3, 'Admin');
+
+-- Default accounts (bcrypt hashes; change these on any real deployment)
+INSERT INTO `users` (`id`, `role_id`, `first_name`, `last_name`, `status`, `email`, `contact`, `password`) VALUES
+(1, 2, 'Juanito', 'Bunao',     'active', 'registrar@hehms.edu.ph', '09170000001', '$2y$10$67bmpeQ91MNy4c.xx7MIUO49M38fqpcrUCk81V.1xVsBF0LZWsCfK'),  -- Registrar@123
+(2, 3, 'Juanito', 'Bunao',     'active', 'admin@hehms.edu.ph',     '09170000002', '$2y$10$vz/hE3MinRWOhHJyST8KE.8m6VZBPbZTNl1YuA34FPQyF7xPmZSc.'),  -- Admin@123
+(3, 1, 'Juan',    'Dela Cruz', 'active', 'juan@hehms.edu.ph',      '09123456789', '$2y$10$FfMQCfUH54jmNE4J1kz/2Oh4b6IDNMuKRuHlhAUT25rZRmU.fOHAO'); -- Student@123
+
+-- Demo student's academic profile (school number 2026-9001)
+INSERT INTO `student_profiles` (`user_id`, `student_id`, `lrn`, `grade_level`, `school_year_last_attended`) VALUES
+(3, '2026-9001', '123456789012', NULL, NULL);
+
+-- Requestable document types (mirrors the seed list in phpLogics/document_types.php).
+-- The catalog is intentionally just THREE certificates — everything else
+-- was removed from the system (2026-10-08 cleanup).
+INSERT INTO `document_types` (`id`, `name`, `requires_grade_level`, `is_active`, `sort_order`) VALUES
+(1, 'Certificate of Enrollment',            1, 1, 1),
+(2, 'Certificate of Good Moral',            0, 1, 2),
+(3, 'Certificate of Completion/Graduation', 1, 1, 3);
+
+-- Branding + operational defaults (matches the code defaults in site_config.php)
+INSERT INTO `site_settings` (`setting_key`, `setting_value`) VALUES
+('logo_path',             'assets/img/Logo.png'),
+('theme_color',           '#6b8f3a'),
+('design_theme',          'classic'),
+('office_hours',          'Monday to Friday, 8:00 AM – 4:00 PM'),
+('contact_email',         'registrar@hehms.edu.ph'),
+('contact_phone',         '(044) 123-4567'),
+('contact_location',      'Hilario E. Hermosa Memorial High School, Siclong, Laur, Nueva Ecija'),
+('document_types_seeded', '1');
+
+-- Welcome announcement (shown on the student dashboard)
+INSERT INTO `announcements` (`title`, `message`, `is_active`, `created_by`) VALUES
+('Welcome to the HEHMS Credential Request System',
+ 'Request and track your school documents online — no campus visit required. Click “Request a Document” to get started.',
+ 1, NULL);
+
 /*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
 
 /*!40101 SET SQL_MODE=@OLD_SQL_MODE */;

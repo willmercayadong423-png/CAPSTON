@@ -1,8 +1,15 @@
-<!-- ── mainPage.php ───────────────────────────────────────────────────────────── -->
 <?php
+require __DIR__ . '/../database/db.php';
 
-
-include(__DIR__ . '/../database/db.php');
+// ── Security headers (login page is reachable pre-auth) ───────────
+// NOTE: nothing may be printed before this block — output started here
+// would make these header() calls fail silently.
+header("X-Content-Type-Options: nosniff");
+header("X-Frame-Options: DENY");
+header("Referrer-Policy: strict-origin-when-cross-origin");
+header("Cache-Control: private, no-cache, no-store, must-revalidate, max-age=0");
+header("Pragma: no-cache");
+header("Expires: 0");
 include __DIR__ . '/../phpLogics/site_config.php';
 require_once __DIR__ . '/../phpLogics/audit.php';
 require_once __DIR__ . '/../phpLogics/icons.php';
@@ -39,7 +46,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['login'])) {
         $errorMessage = "Your session expired. Please try again.";
     } else {
 
-    $email    = trim($_POST["username"]);
+    $email    = trim($_POST["username"] ?? '');
     // ⚠ Do NOT trim the password: profile updates store it untrimmed, so a
     // password containing leading/trailing spaces could never log in here.
     $password = (string)($_POST["password"] ?? '');
@@ -189,13 +196,43 @@ $heroSlides = [
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Credential Request System — HEHMS</title>
-    <link rel="stylesheet" href="mainPageCSS.css">
+    <link rel="icon" type="image/png" href="../assets/img/Logo.png">
+    <title>Credential Request System — HEHMHS</title>
+    <link rel="stylesheet" href="mainPageCSS.css?v=6">
     <?php echo theme_head(); // admin-managed brand color ?>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 
-    <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,500;0,9..144,600;0,9..144,700;1,9..144,400;1,9..144,500&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- ── Card-visibility guarantee (inlined) ──────────────────────────────
+         The hero info cards are part of the design at EVERY size. These
+         rules are inlined in the HTML so that even a browser holding a
+         STALE cached copy of mainPageCSS.css (which once hid the cards on
+         phones) can never hide them again. Mirrors the external stylesheet. -->
+    <style>
+        /* Paint-order guarantee: hero content must sit ABOVE the slide
+           photos (static content paints below absolutely-positioned slides
+           and got covered once the images loaded). */
+        @media (max-width: 980px) {
+            .photo-panel__content { position: relative !important; z-index: 5 !important; }
+        }
+        .info-row { display: grid !important; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+        @media (max-width: 980px) {
+            .info-row { display: grid !important; gap: 16px; }
+        }
+        @media (max-width: 560px) {
+            .info-row { display: grid !important; gap: 8px; }
+            .info-row__item { padding: 10px 10px 11px !important; gap: 3px; text-align: center; align-items: center; }
+            .info-row__item strong { font-size: 11.5px; line-height: 1.35; }
+            .info-row__item span { display: none !important; }
+        }
+        @media (max-height: 500px) {
+            .info-row { display: grid !important; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+            .info-row__item { padding: 8px 8px 9px !important; gap: 3px; text-align: center; align-items: center; }
+            .info-row__item strong { font-size: 11.5px; line-height: 1.35; }
+            .info-row__item span { display: none !important; }
+        }
+    </style>
+    <!-- Fonts are SELF-HOSTED (assets/fonts) — the page looks identical even offline.
+         (Google-hosted fonts used to make the whole site look broken without internet.) -->
+    <link rel="stylesheet" href="../assets/fonts/fraunces-inter.css">
 </head>
 
 <body>
@@ -311,6 +348,7 @@ $heroSlides = [
 
     </div>
 
+    <script src="../assets/js/offline-guard.js" defer></script>
     <script src="../assets/js/icons.js"></script>
     <script>
         // ── Auto-sliding hero photo panel ──────────────────────────────

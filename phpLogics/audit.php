@@ -1,6 +1,6 @@
 <?php
 /* ═══════════════════════════════════════════════════════════════════
- * HEHMS Audit Trail helper  (phpLogics/audit.php)
+ * HEHMHS Audit Trail helper  (phpLogics/audit.php)
  * ───────────────────────────────────────────────────────────────────
  * One function — audit_log() — called at every security-relevant
  * point (logins, request lifecycle, certificate releases, account

@@ -26,14 +26,21 @@ if (!isset($_POST['student_id'])) {
 $id = trim($_POST['student_id']);
 
 // Never archive your own account (would lock out the registrar)
-// Schema v5: school numbers live in student_profiles
-$chk = $conn->prepare("
-    SELECT u.id
-    FROM users u
-    JOIN student_profiles sp ON sp.user_id = u.id
-    WHERE sp.student_id = ?
-");
-$chk->bind_param("s", $id);
+// Schema v5: school numbers live in student_profiles — but STAFF accounts
+// have none, so they are addressed as "uid:N" by the admin UI.
+if (preg_match('/^uid:(\d+)$/', $id, $uidMatch)) {
+    $chk = $conn->prepare("SELECT id FROM users WHERE id = ?");
+    $uid = (int)$uidMatch[1];          // bind_param takes args by reference
+    $chk->bind_param("i", $uid);
+} else {
+    $chk = $conn->prepare("
+        SELECT u.id
+        FROM users u
+        JOIN student_profiles sp ON sp.user_id = u.id
+        WHERE sp.student_id = ?
+    ");
+    $chk->bind_param("s", $id);
+}
 $chk->execute();
 $target = $chk->get_result()->fetch_assoc();
 $chk->close();
@@ -45,6 +52,36 @@ if (!$target) {
 if ((int)$target['id'] === (int)($_SESSION['user_id'] ?? 0)) {
     echo json_encode(["success" => false, "message" => "You cannot archive your own account."]);
     exit;
+}
+
+/* ── Last-admin guard ────────────────────────────────────────────
+ * Archiving the ONLY active administrator would leave the system
+ * unmanageable (nobody could restore it). Self-archive is already
+ * blocked above, so this catches every remaining path. */
+$adminChk = $conn->prepare("
+    SELECT COUNT(*) FROM users u JOIN roles r ON r.role_id = u.role_id
+    WHERE LOWER(r.role_name) = 'admin' AND LOWER(u.status) = 'active' AND u.id != ?
+");
+$targetIdForChk = (int)$target['id'];
+$adminChk->bind_param("i", $targetIdForChk);
+$adminChk->execute();
+$otherAdmins = (int)$adminChk->get_result()->fetch_row()[0];
+$adminChk->close();
+
+if ($otherAdmins === 0) {
+    $isTargetAdmin = $conn->prepare("
+        SELECT 1 FROM users u JOIN roles r ON r.role_id = u.role_id
+        WHERE u.id = ? AND LOWER(r.role_name) = 'admin'
+    ");
+    $isTargetAdmin->bind_param("i", $targetIdForChk);
+    $isTargetAdmin->execute();
+    $targetIsAdmin = $isTargetAdmin->get_result()->fetch_row() !== null;
+    $isTargetAdmin->close();
+
+    if ($targetIsAdmin) {
+        echo json_encode(["success" => false, "message" => "This is the last active Administrator account — it cannot be archived."]);
+        exit;
+    }
 }
 
 $stmt = $conn->prepare("UPDATE users SET status = 'archived' WHERE id = ?");

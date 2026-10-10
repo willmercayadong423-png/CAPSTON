@@ -40,13 +40,21 @@ if (!$me) {
 }
 
 $myName        = htmlspecialchars(($me['first_name'] ?? '') . ' ' . ($me['last_name'] ?? ''));
-$myPhoto       = !empty($me['profile_photo']) ? '../' . htmlspecialchars($me['profile_photo']) : null;
+// Own photo via the authenticated endpoint (photos are not web-served)
+$myPhoto       = !empty($me['profile_photo'])
+    ? '../phpLogics/download_profile.php?user_id=' . (int)$_SESSION['user_id']
+    : null;
 $myInitials    = strtoupper(substr($me['first_name'] ?? 'A', 0, 1) . substr($me['last_name'] ?? '', 0, 1));
 
 $activeView    = $_GET['view'] ?? 'overview';
 // Legacy URLs may still point at the removed standalone announcements tab —
 // announcements now live inside the Information section.
 if ($activeView === 'announcements') $activeView = 'information';
+// Whitelist — an unknown ?view= value would otherwise leave every section
+// display:none and render a blank page (same guard as the student portal).
+if (!in_array($activeView, ['overview', 'requests', 'accounts', 'settings', 'information', 'audit', 'account'], true)) {
+    $activeView = 'overview';
+}
 
 // Friendly greeting by time of day
 $hourNow  = (int)date('G');
@@ -72,7 +80,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['release_request'])) {
         exit();
     }
 
-    $req_id = (int)$_POST['req_id'];
+    $req_id = (int)($_POST['req_id'] ?? 0);
     $row    = certificate_fetch($conn, $req_id);
 
     if (!$row) {
@@ -80,14 +88,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['release_request'])) {
         exit();
     }
 
+    // ── State guard (same rule as the registrar dashboard) ──────────
+    if (in_array((string)$row['status'], ['Released', 'Cancelled'], true)) {
+        $why = $row['status'] === 'Released'
+            ? 'already released'
+            : 'cancelled/rejected — re-queue it to Pending first';
+        header("Location: adminDashboard.php?view=requests&release_error=" . urlencode("This request is {$why} and cannot be released."));
+        exit();
+    }
+
     // ── Admin edits (fall back to system defaults when empty) ──
     $edits = [
-        'title'         => trim((string)($_POST['cert_title']    ?? '')),
-        'body'          => trim((string)($_POST['cert_body']     ?? '')),
-        'officer_name'  => trim((string)($_POST['officer_name']  ?? '')),
-        'officer_title' => trim((string)($_POST['officer_title'] ?? '')),
+        'title'         => db_utf8(trim((string)($_POST['cert_title']    ?? ''))),
+        'body'          => db_utf8(trim((string)($_POST['cert_body']     ?? ''))),
+        'officer_name'  => db_utf8(trim((string)($_POST['officer_name']  ?? ''))),
+        'officer_title' => db_utf8(trim((string)($_POST['officer_title'] ?? ''))),
         'cert_date'     => trim((string)($_POST['cert_date']     ?? '')),
-        'remarks'       => trim((string)($_POST['remarks']       ?? '')),
+        'remarks'       => db_utf8(trim((string)($_POST['remarks']       ?? ''))),
     ];
 
     // Signing-officer default: the admin currently logged in
@@ -128,9 +145,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['release_request'])) {
 
     $upd = $conn->prepare(
         "UPDATE document_requests
-         SET status = 'Released', cancelled_by = NULL,
+         SET status = 'Released', cancelled_by = NULL, rejection_reason = NULL,
              date_released = NOW(), e_certificate = ?
-         WHERE id = ?"
+         WHERE id = ? AND status NOT IN ('Released','Cancelled')"
     );
     $upd->bind_param("si", $certWeb, $req_id);
     $upd->execute();
@@ -177,9 +194,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_status'])) {
         exit();
     }
 
-    $req_id    = (int)$_POST['req_id'];
-    $newStatus = $_POST['new_status'];
-    $allowed   = ['Pending', 'Processing', 'Ready for Pickup', 'Released', 'Cancelled'];
+    $req_id    = (int)($_POST['req_id'] ?? 0);
+    $newStatus = $_POST['new_status'] ?? '';
+    // 'Released' is NOT accepted here (same rule as the registrar dashboard):
+    // releasing must go through the e-certificate flow so no request is
+    // ever marked Released without a certificate.
+    $allowed   = ['Pending', 'Processing', 'Ready for Pickup', 'Cancelled'];
 
     if (in_array($newStatus, $allowed, true)) {
         $dbStatus    = $newStatus;
@@ -195,7 +215,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_status'])) {
         if ($newStatus === 'Cancelled') {
             // Rejection — a written reason is REQUIRED so the student knows why.
             $cancelledBy  = 'registrar';   // recorded as a staff rejection
-            $rejectReason = trim((string)($_POST['reject_reason'] ?? ''));
+            $rejectReason = db_utf8(trim((string)($_POST['reject_reason'] ?? '')));
             if ($rejectReason === '') {
                 header("Location: adminDashboard.php?view=requests&error=reason_required");
                 exit();
@@ -351,7 +371,9 @@ function statusBadge($status, $cancelledBy = '')
 function avatarHtml($r)
 {
     if (!empty($r['profile_photo'])) {
-        $src = '../' . htmlspecialchars($r['profile_photo']);
+        // Photos are blocked from direct /uploads/ access — serve through
+        // the authenticated endpoint (admin may view any user's photo).
+        $src = '../phpLogics/download_profile.php?user_id=' . (int)$r['user_id'];
         return "<img src=\"{$src}\" alt=\"avatar\" class=\"avatar-img\">";
     }
     $parts    = explode(' ', trim($r['student_name']));
@@ -409,7 +431,8 @@ function renderRow($r, $isArchived = false)
                     data-date=\"" . htmlspecialchars(date('M d, Y', strtotime($r['date_requested'])), ENT_QUOTES) . "\"
                     data-status=\"" . htmlspecialchars($r['status'], ENT_QUOTES) . "\"
                     data-cancelled=\"" . htmlspecialchars($r['cancelled_by'] ?? '', ENT_QUOTES) . "\"
-                    data-avatar=\"" . htmlspecialchars($r['profile_photo'] ?? '', ENT_QUOTES) . "\">
+                    data-avatar=\"" . (!empty($r['profile_photo']) ? 1 : '') . "\"
+                    data-avatar-user=\"" . (int)$r['user_id'] . "\">
                     " . icon('paperclip', 13) . " View Details
                 </button>";
 
@@ -423,6 +446,18 @@ function renderRow($r, $isArchived = false)
             };
         }
 
+        // 📧 Re-send the certificate email (original delivery may have
+        // failed, e.g. Gmail daily sending limit — see audit trail)
+        $resendBtn = '';
+        if ($r['status'] === 'Released' && !empty($r['e_certificate'])) {
+            $resendBtn = "<form method='POST' action='../phpLogics/resendCertMail.php' style='display:inline'
+                onsubmit=\"return confirm('Re-send the certificate email to the student?')\" title='Retry the delivery email for this released certificate'>
+                <input type='hidden' name='csrf_token' value='" . htmlspecialchars(csrf_token(), ENT_QUOTES) . "'>
+                <input type='hidden' name='req_id' value='{$id}'>
+                <button type='submit' class='btn-release'>" . icon('mail', 12) . " Resend Email</button>
+            </form>";
+        }
+
         return "
         <tr data-status=\"{$archStatus}\">
             <td><strong>{$padId}</strong></td>
@@ -431,7 +466,7 @@ function renderRow($r, $isArchived = false)
             <td>{$dateReq}</td>
             <td>{$dateRel}</td>
             <td>{$badge}</td>
-            <td><div class='action-group'>{$viewBtn}</div></td>
+            <td><div class='action-group'>{$viewBtn}{$resendBtn}</div></td>
         </tr>";
     }
 
@@ -572,14 +607,14 @@ if (!function_exists('audit_badge_class')) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Admin Dashboard — HEHMS</title>
+    <title>Admin Dashboard — HEHMHS</title>
     <!-- Shared portal design system (same as student + registrar) + admin components -->
     <link rel="stylesheet" href="../student/portal.css?v=2">
     <link rel="stylesheet" href="../registrar/registrarCSS.css?v=9">
-    <link rel="stylesheet" href="admin.css?v=2">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="admin.css?v=3">
+    <!-- Fonts are SELF-HOSTED (assets/fonts) — the page looks identical even offline.
+         (Google-hosted fonts used to make the whole site look broken without internet.) -->
+    <link rel="stylesheet" href="../assets/fonts/inter.css">
     <?php echo theme_head(); // admin-managed brand color ?>
 </head>
 
@@ -791,6 +826,12 @@ if (!function_exists('audit_badge_class')) {
                 <?php if (isset($_GET['release_error'])): ?>
                     <div class="alert alert-danger"><?php echo icon('alert', 14); ?> <?php echo htmlspecialchars($_GET['release_error']); ?></div>
                 <?php endif; ?>
+                <?php if (isset($_GET['resent'])): ?>
+                    <div class="alert alert-success"><?php echo icon('check-circle', 14); ?> Certificate email re-sent to the student.</div>
+                <?php endif; ?>
+                <?php if (isset($_GET['resend_failed'])): ?>
+                    <div class="alert alert-danger"><?php echo icon('alert', 14); ?> The re-send failed (mail server refused delivery — e.g. Gmail's daily sending limit). The certificate itself is unaffected and still downloadable from the student's dashboard. Try again later.</div>
+                <?php endif; ?>
 
                 <!-- Request status tiles (clickable → filtered tables) -->
                 <div class="stat-grid">
@@ -967,6 +1008,9 @@ if (!function_exists('audit_badge_class')) {
                             </tbody>
                         </table>
                     </div>
+
+                    <!-- Pagination — 10 accounts per page (fills via admin.js) -->
+                    <div id="accounts-pager" class="accounts-pager"></div>
                 </div>
             </div>
 
@@ -1324,7 +1368,7 @@ if (!function_exists('audit_badge_class')) {
 
     <footer class="footer">
         <div class="footer-inner">
-            <img class="footer-logo" src="<?php echo site_logo_url(); ?>" alt="HEHMS logo">
+            <img class="footer-logo" src="<?php echo site_logo_url(); ?>" alt="HEHMHS logo">
             <div class="footer-name">Hilario E. Hermosa Memorial High School</div>
             <div>© <?php echo date('Y'); ?> · Credential Request &amp; Tracking System</div>
         </div>
@@ -1427,14 +1471,14 @@ if (!function_exists('audit_badge_class')) {
         </div>
     </div>
 
-    <!-- ══ VIEW DOCUMENTS MODAL ══ -->
-    <div id="viewDocsModal" class="modal-overlay">
-        <div class="modal-box">
+    <!-- ══ ACCOUNT INFORMATION MODAL (click a row in Accounts) ══ -->
+    <div id="accountInfoModal" class="modal-overlay">
+        <div class="modal-box modal-box--wide">
             <div class="modal-header">
-                <h3><?php echo icon('file-text', 16); ?> <span id="viewDocsTitleText">Document Requests</span></h3>
-                <button id="btn-close-docs-modal" class="modal-close" type="button"><?php echo icon('x', 13); ?></button>
+                <h3><?php echo icon('user', 16); ?> <span id="aiTitleText">Account Information</span></h3>
+                <button id="btn-close-account-modal" class="modal-close" type="button"><?php echo icon('x', 13); ?></button>
             </div>
-            <div class="modal-body" id="docs-modal-body">
+            <div class="modal-body" id="account-modal-body">
                 <p class="empty-state">Loading…</p>
             </div>
         </div>
@@ -1444,7 +1488,8 @@ if (!function_exists('audit_badge_class')) {
 
     <script>var CSRF_TOKEN = <?php echo json_encode($csrf); ?>;</script>
     <script src="../assets/js/icons.js"></script>
-    <script src="admin.js?v=7"></script>
+    <script src="admin.js?v=8"></script>
+    <script src="../assets/js/offline-guard.js" defer></script>
     <script src="../assets/js/session-timeout.js" defer></script>
 
     <!-- ══ Reject Reason Modal (adopted from Registrar) ══ -->
@@ -1591,7 +1636,7 @@ if (!function_exists('audit_badge_class')) {
                 </div>
                 <div class="rf-group rf-full">
                     <label>Certificate Body
-                        <span class="rf-hint">Placeholders: {NAME} {SY} {DATE} {PURPOSE} {LRN} {GRADE}</span>
+                        <span class="rf-hint">Placeholders: {NAME} {SY} {DATE} {PURPOSE} {LRN} {GRADE} &middot; **bold**</span>
                     </label>
                     <textarea id="rf-body" name="cert_body" rows="4" maxlength="1500"></textarea>
                 </div>

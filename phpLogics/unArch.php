@@ -25,21 +25,21 @@ if (!isset($_POST['student_id'])) {
 
 $id = trim($_POST['student_id']);
 
-// Schema v5: school numbers live in student_profiles — resolve then update by id
-$stmt = $conn->prepare("
-    UPDATE users u
-    JOIN student_profiles sp ON sp.user_id = u.id
-    SET u.status = 'active'
-    WHERE sp.student_id = ?
-");
-
-if (!$stmt) {
-    error_log("unArch prepare failed: " . $conn->error);
-    echo json_encode(["success" => false, "message" => "Database error."]);
-    exit;
+// Schema v5: school numbers live in student_profiles — update by id.
+// STAFF accounts have no school number and arrive as "uid:N".
+if (preg_match('/^uid:(\d+)$/', $id, $uidMatch)) {
+    $stmt = $conn->prepare("UPDATE users SET status = 'active' WHERE id = ?");
+    $uid = (int)$uidMatch[1];          // bind_param takes args by reference
+    $stmt->bind_param("i", $uid);
+} else {
+    $stmt = $conn->prepare("
+        UPDATE users u
+        JOIN student_profiles sp ON sp.user_id = u.id
+        SET u.status = 'active'
+        WHERE sp.student_id = ?
+    ");
+    $stmt->bind_param("s", $id);
 }
-
-$stmt->bind_param("s", $id);
 
 if (!$stmt->execute()) {
     error_log("unArch execute failed: " . $stmt->error);

@@ -4,7 +4,15 @@
  * top-level rules under .reqmgr so they can coexist with dashb.css /
  * admin.css on the Admin dashboard. Rules already scoped to the unique
  * modal IDs are copied verbatim; @keyframes stay global.
+ *
+ * CLI ONLY (run from the project root:  php build_requests_css.php).
+ * It writes a file, so it must never be reachable through a browser.
  */
+if (PHP_SAPI !== 'cli') {
+    http_response_code(404);
+    exit('Not found');
+}
+
 $src = file_get_contents('registrar/registrarCSS.css');
 $lines = explode("\n", $src);   // ORIGINAL line numbers — ranges refer to these
 $n = count($lines);
@@ -91,7 +99,7 @@ $css = transform($raw, '.reqmgr');
 $css = str_replace('#view-dashboard ', '', $css);
 
 $header = "/* ══════════════════════════════════════════════════════════════
-   HEHMS — Request-management styles
+   HEHMHS — Request-management styles
    Extracted from registrar/registrarCSS.css by build_requests_css.php
    and scoped under .reqmgr so the Admin dashboard can reuse the
    registrar's request UI without colliding with dashb.css/admin.css.

@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════════════
-   HEHMS — shared scrollable table  (used by ALL dashboards)
+   HEHMHS — shared scrollable table  (used by ALL dashboards)
    ───────────────────────────────────────────────────────────────
    Usage:
        <div class="tbl-scroll-wrap">
@@ -14,6 +14,9 @@
 
 .tbl-scroll-wrap {
     overflow: auto;                    /* horizontal AND vertical scroll */
+    min-width: 0;                      /* flex/grid children must be able to */
+    max-width: 100%;                   /* shrink — otherwise the table's  */
+                                       /* min-width pushes the page wide   */
     max-height: 620px;
     background: #fff;
     border: 1px solid rgba(138, 154, 91, .25);

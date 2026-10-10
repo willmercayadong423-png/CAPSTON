@@ -1,6 +1,6 @@
 <?php
 /* ═══════════════════════════════════════════════════════════════════
- * HEHMS Certificate Generator  (phpLogics/certificate.php)
+ * HEHMHS Certificate Generator  (phpLogics/certificate.php)
  * ───────────────────────────────────────────────────────────────────
  * System-generates the e-certificate as a PDF (dompdf). The registrar
  * can edit the generated content before releasing — the student data
@@ -24,11 +24,69 @@
 
 require_once __DIR__ . '/../vendor/autoload.php';
 
+use chillerlan\QRCode\{QRCode, QROptions};
+use chillerlan\QRCode\Output\QRGdImagePNG;
+
+/* ═══════════════════════════════════════════════════════════════════
+ * QR VERIFICATION — every e-certificate carries a QR code that opens
+ * the public verification page (verify.php) with an unguessable code:
+ *
+ *   certificate_verify_code($reqId)  → 16-hex HMAC of the request id
+ *   certificate_verify_url($reqId)   → absolute URL for the QR target
+ *   certificate_qr_uri($reqId)       → base64 PNG data-URI for the PDF
+ *
+ * The code is deterministic (HMAC-SHA256 vs VERIFICATION_SECRET), so the
+ * QR on the live preview always matches the one on the released PDF,
+ * and guessing/enumerating other requests' codes is infeasible.
+ * ═══════════════════════════════════════════════════════════════════ */
+function certificate_verify_code(int $reqId): string
+{
+    $secret = defined('VERIFICATION_SECRET') ? VERIFICATION_SECRET : 'hehms-verify';
+    return substr(hash_hmac('sha256', 'certificate:' . $reqId, $secret), 0, 16);
+}
+
+function certificate_verify_url(int $reqId): string
+{
+    // Absolute URL — a phone camera must be able to open it directly.
+    $scheme   = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+    $host     = $_SERVER['HTTP_HOST'] ?? 'localhost';
+    $docRoot  = rtrim(str_replace('\\', '/', $_SERVER['DOCUMENT_ROOT'] ?? ''), '/');
+    $projDir  = rtrim(str_replace('\\', '/', dirname(__DIR__)), '/');
+    $base     = ($docRoot !== '' && strpos($projDir, $docRoot) === 0)
+        ? substr($projDir, strlen($docRoot))
+        : '';
+    $base     = implode('/', array_map('rawurlencode', explode('/', $base)));
+
+    return $scheme . '://' . $host . $base . '/verify.php'
+         . '?req=' . $reqId . '&code=' . certificate_verify_code($reqId);
+}
+
+function certificate_qr_uri(int $reqId): string
+{
+    static $cache = [];
+    if (isset($cache[$reqId])) return $cache[$reqId];
+
+    try {
+        $options = new QROptions([
+            'outputInterface' => QRGdImagePNG::class,  // PNG via GD
+            'eccLevel'        => 'H',                  // max damage tolerance
+            'scale'           => 5,
+            'imageBase64'     => true,                 // → data:image/png;base64,…
+            'addQuietzone'    => true,
+        ]);
+        return $cache[$reqId] = (string)(new QRCode($options))->render(certificate_verify_url($reqId));
+    } catch (Throwable $e) {
+        // A QR failure must never block the certificate itself
+        error_log('QR generation failed (REQ-' . $reqId . '): ' . $e->getMessage());
+        return '';
+    }
+}
+
 /* ── Fetch one request joined with its student record ────────────── */
 function certificate_fetch(mysqli $conn, int $req_id): ?array
 {
     $q = $conn->prepare(
-        "SELECT dr.id AS req_id, dt.name AS document_type, dr.purpose, dr.date_requested,
+        "SELECT dr.id AS req_id, dr.status, dt.name AS document_type, dr.purpose, dr.date_requested,
                 dr.e_certificate, dr.grade_level AS req_grade_level,
                 dr.school_year_last_attended AS req_school_year,
                 s.id AS student_pk, sp.student_id AS school_id,
@@ -57,78 +115,79 @@ function certificate_fetch(mysqli $conn, int $req_id): ?array
     return $row;
 }
 
-/* ── Default editable fields (auto-filled from the record) ───────── */
+/* ── Default editable fields (auto-filled from the record) ─────────
+ * Bodies follow the school's OFFICIAL printed certificates
+ * (Good_Moral.jpg / Graduation.jpg / Enrollment.jpg).
+ * Placeholders: {NAME} renders as FIRSTNAME LASTNAME (bold, all caps),
+ * {LRN} = Learner Reference Number, {SY} = school year,
+ * {GRADE} = grade level (plain, for inline "as Grade 11"),
+ * {DATE} = "22nd day of SEPTEMBER, 2026" (official format). */
 function certificate_defaults(array $row, string $officerName = ''): array
 {
     $docType = $row['document_type'];
 
-    $title = strtoupper($docType);
-    if ($docType === 'SF10/Form 137') {
-        $title = 'CERTIFICATION — FORM 137 (SF10)';
-    }
+    // ── Title style ──
+    // Graduation prints "CERTIFICATE OF GRADUATION" (no salutation);
+    // Good Moral and Enrollment are letter-style — they print the centered
+    // title "CERTIFICATION" above "To Whom It May Concern:".
+    $title = ($docType === 'Certificate of Completion/Graduation')
+        ? 'CERTIFICATE OF GRADUATION'
+        : 'CERTIFICATION';
 
-    // Per-document default bodies — official DepEd wording.
-    // Placeholders: {NAME} renders as SURNAME, FIRSTNAME (all caps),
-    // {SY} = school year last attended, {PURPOSE} = request purpose.
-    // Certificate of Good Moral — official wording. Graduates get the
-    // "graduated during SY" opening; enrolled students get "bonafide student".
+    // Paragraph indent — 8 non-breaking spaces (survives the PDF
+    // renderer's whitespace collapsing). Every paragraph of every
+    // certificate body starts with it.
+    $ind = str_repeat("\u{00A0}", 8);
+
+    // ── Good Moral — official wording (DepEd letter style), three
+    // paragraphs: certification → further certification → issued line.
+    // Currently enrolled students get the "is a student in this school"
+    // opening; graduates get the "graduated" opening.
     $goodMoral = trim($row['grade_level'] ?? '') !== ''
-        ? 'This is to certify that {NAME} is a bonafide student of HILARIO E. HERMOSA MEMORIAL HIGH SCHOOL. '
-          . 'This further certifies that he/she has not committed any misbehavior and/or violated any school rules and regulation during his/her stay in school.'
-        : 'This is to certify that {NAME} graduated from HILARIO E. HERMOSA MEMORIAL HIGH SCHOOL during the school year {SY}. '
-          . 'This further certifies that he/she has not committed any misbehavior and/or violated any school rules and regulation during his/her stay in school.';
+        ? "{$ind}THIS IS TO CERTIFY THAT {NAME} is a student in this school, **HILARIO E. HERMOSA MEMORIAL HIGH SCHOOL**, Siclong, Laur, Nueva Ecija, this school year {SY}.\n\n"
+          . "{$ind}This certifies further that he/she has never been subjected to any disciplinary action and that his/her behavior is a clear manifestation of **GOOD MORAL CHARACTER**.\n\n"
+          . "{$ind}This certification is issued this {DATE} for reference purposes."
+        : "{$ind}THIS IS TO CERTIFY THAT {NAME} graduated from **HILARIO E. HERMOSA MEMORIAL HIGH SCHOOL**, Siclong, Laur, Nueva Ecija.\n\n"
+          . "{$ind}This certifies further that he/she has never been subjected to any disciplinary action and that his/her behavior is a clear manifestation of **GOOD MORAL CHARACTER**.\n\n"
+          . "{$ind}This certification is issued this {DATE} for reference purposes.";
+
+    // Paragraph indent used by every body — see $ind above.
 
     $bodies = [
         'Certificate of Completion/Graduation' =>
-            'This is to certify that {NAME} graduated from HILARIO E. HERMOSA MEMORIAL HIGH SCHOOL during the school year {SY}.',
-        'Diploma' =>
-            'This is to certify that {NAME} graduated from HILARIO E. HERMOSA MEMORIAL HIGH SCHOOL during the school year {SY}.',
+            "{$ind}This is to certify that {NAME} has satisfactorily completed the requirements prescribed for SECONDARY SCHOOL CURRICULUM of the DEPARTMENT OF EDUCATION last School Year {SY}.\n\n"
+          . "{$ind}This certifies further that the school **did not issue YEARBOOK** since this is not a requirement for graduation.\n\n"
+          . "{$ind}Given this {DATE} for reference purposes.",
         'Certificate of Enrollment' =>
-            'This is to certify that {NAME} is officially enrolled at HILARIO E. HERMOSA MEMORIAL HIGH SCHOOL.',
-        'Certificate of Registration' =>
-            'This is to certify that {NAME} is officially enrolled at HILARIO E. HERMOSA MEMORIAL HIGH SCHOOL.',
-        'Certificate of Grades' =>
-            'This is to certify that {NAME} was a bonafide student of HILARIO E. HERMOSA MEMORIAL HIGH SCHOOL and that a copy of his/her report card is available in the records of this school.',
+            "{$ind}THIS IS TO CERTIFY THAT {NAME} with Learner Reference Number (LRN) **{LRN}** is presently enrolled as **{GRADE}** at **HILARIO E. HERMOSA MEMORIAL HIGH SCHOOL**, Siclong, Laur, Nueva Ecija this school year {SY}.\n\n"
+          . "{$ind}This certification is issued this {DATE} for reference purposes.",
         'Certificate of Good Moral' => $goodMoral,
-        'Certificate of Transfer' =>
-            'This is to certify that {NAME} was a bonafide student of HILARIO E. HERMOSA MEMORIAL HIGH SCHOOL and is eligible for transfer to another school.',
-        'SF10/Form 137' =>
-            'This is to certify that the Form 137 (SF10) permanent record of {NAME} is on file at HILARIO E. HERMOSA MEMORIAL HIGH SCHOOL.',
-        'YearBook' =>
-            'This is to certify that {NAME} was a bonafide student of HILARIO E. HERMOSA MEMORIAL HIGH SCHOOL.',
     ];
 
     $body = $bodies[$docType]
-        ?? 'This is to certify that {NAME} was a bonafide student of HILARIO E. HERMOSA MEMORIAL HIGH SCHOOL.';
-
-    // Standard closing clause on every certification (includes issue date)
-    $body .= ' This certification is issued this {DATE} for any legal purposes it may serve.';
+        ?? 'This is to certify that {NAME} was a bonafide student of HILARIO E. HERMOSA MEMORIAL HIGH SCHOOL. '
+         . 'This certification is issued this {DATE} for reference purposes.';
 
     return [
         'title'        => $title,
         'body'         => $body,
-        // Default signatory for every certificate (still editable per release)
-        'officer_name' => 'EDUARD B. GOBOLI',
-        'officer_title'=> 'Principal',
+        // Default signatory — the school principal on the official
+        // certificates (still editable per release)
+        'officer_name' => 'NOILAN C. ATENDIDO',
+        'officer_title'=> 'School Principal II',
         'cert_date'    => date('Y-m-d'),
         'remarks'      => '',
     ];
 }
 
-/* ── Grade/context line used for the {GRADE} placeholder ─────────── */
+/* ── Grade value for the {GRADE} placeholder (plain "Grade 11") ── */
 function certificate_grade_text(array $row): string
 {
     $grade = trim($row['grade_level'] ?? '');
-    $strand = trim($row['strand'] ?? '');
-    $sy = trim($row['school_year_last_attended'] ?? '');
-
     if ($grade !== '') {
-        return ', currently enrolled in ' . $grade . ($strand !== '' ? ' — ' . $strand . ' Strand' : '');
+        return $grade;
     }
-    if ($sy !== '') {
-        return ', who last attended this school in School Year ' . $sy;
-    }
-    return '';
+    return '________';
 }
 
 /* ── Merge registrar edits over the defaults ─────────────────────── */
@@ -148,12 +207,13 @@ function certificate_build_data(array $row, array $edits, string $officerName = 
     }
 
     return [
+        'req_id'       => (int)$row['req_id'],
         'req_no'       => 'REQ-' . str_pad((string) $row['req_id'], 4, '0', STR_PAD_LEFT),
         'doc_type'     => $row['document_type'],
         'student_name' => trim($row['first_name'] . ' ' . $row['last_name']),
-        // DepEd style for the certificate body: SURNAME, FIRSTNAME (all caps)
-        'student_name_cert' => strtoupper(trim(trim($row['last_name'] ?? '') . ', ' . trim($row['first_name'] ?? ''), " ,")),
-        'lrn'          => trim($row['lrn'] ?? '') !== '' ? $row['lrn'] : 'N/A',
+        // Official certificate style: FIRSTNAME LASTNAME (bold, all caps)
+        'student_name_cert' => strtoupper(trim(trim($row['first_name'] ?? '') . ' ' . trim($row['last_name'] ?? ''))),
+        'lrn'          => trim($row['lrn'] ?? '') !== '' ? $row['lrn'] : '________',
         'grade_text'   => certificate_grade_text($row),
         'purpose'      => $row['purpose'],
         'sy'           => trim($row['school_year_last_attended'] ?? '') !== ''
@@ -165,7 +225,8 @@ function certificate_build_data(array $row, array $edits, string $officerName = 
         'officer_name' => $pick('officer_name', 100),
         'officer_title'=> $pick('officer_title', 100),
         'cert_date'    => $date,
-        'date_display' => date('jS \o\f F Y', strtotime($date)),   // e.g. "24th of June 2022"
+        // Official date format: "22nd day of SEPTEMBER, 2026"
+        'date_display' => date('jS', strtotime($date)) . ' day of ' . strtoupper(date('F', strtotime($date))) . ', ' . date('Y', strtotime($date)),
     ];
 }
 
@@ -203,9 +264,24 @@ function render_certificate_html(array $d): string
 
     $esc = fn($s) => htmlspecialchars((string) $s, ENT_QUOTES, 'UTF-8');
 
+    /* ── Title & salutation — letter-style vs titled, like the official
+       certificates: Graduation = centered title (no salutation);
+       Good Moral & Enrollment = "To Whom It May Concern:" (no title). */
+    $titleHtml = trim((string)$d['title']) !== ''
+        ? '<div class="cert-title">' . $esc($d['title']) . '</div>'
+        : '';
+    $isLetterStyle = in_array($d['doc_type'], ['Certificate of Good Moral', 'Certificate of Enrollment'], true);
+    $salutHtml = $isLetterStyle
+        ? '<div class="cert-to-whom">To Whom It May Concern:</div>'
+        : '';
+
     // Replace placeholders INSIDE the body; escape first so registrar
     // edits can never inject HTML into the PDF.
     $body = nl2br($esc($d['body']));
+    // **bold** syntax — lets the default bodies AND the registrar's edits
+    // in the release modal bold any word(s): **SECONDARY SCHOOL CURRICULUM**
+    // (applied AFTER escaping, so it can never inject HTML)
+    $body = preg_replace('/\*\*(.+?)\*\*/s', '<strong>$1</strong>', $body);
     $body = str_replace(
         ['{NAME}', '{LRN}', '{GRADE}', '{PURPOSE}', '{SY}', '{DATE}'],
         [
@@ -227,30 +303,32 @@ function render_certificate_html(array $d): string
         ? '<img class="cert-logo" src="' . certificate_logo_uri() . '" alt="">'
         : '';
 
-    // Issuance line — official format: "Given this 24th of June 2022, at …"
-    $ts = strtotime($d['cert_date']);
-    $day = date('jS', $ts);
-    $monthYear = date('F Y', $ts);
-    $issuedLine = 'Given this ' . $day . ' of ' . $monthYear
-                . ', at Hilario E. Hermosa Memorial High School, Siclong, Laur, Nueva Ecija.';
+    // Verification QR — sits above the Reference No. in the footer
+    $qr = certificate_qr_uri((int)$d['req_id']) !== ''
+        ? '<img class="cert-qr" src="' . certificate_qr_uri((int)$d['req_id']) . '" alt="Verification QR code">'
+        : '';
 
+    // Issuance line no longer needed here — the official wording carries
+    // the date inside the body ("issued this 22nd day of SEPTEMBER, 2026 …").
     return str_replace(
         [
             '{{LOGO_IMG}}',
+            '{{QR_IMG}}',
             '{{TITLE}}',
+            '{{SALUTATION}}',
             '{{BODY}}',
             '{{REMARKS}}',
-            '{{ISSUED_LINE}}',
             '{{REQ_NO}}',
             '{{OFFICER_NAME}}',
             '{{OFFICER_TITLE}}',
         ],
         [
             $logo,
-            $esc($d['title']),
+            $qr,
+            $titleHtml,
+            $salutHtml,
             $body,
             $remarks,
-            $esc($issuedLine),
             $esc($d['req_no']),
             $esc($d['officer_name']),
             $esc($d['officer_title']),
@@ -267,7 +345,7 @@ function generate_certificate_pdf(array $d): string
         'defaultFont'     => 'DejaVu Serif',
     ]);
     $dompdf->loadHtml(render_certificate_html($d), 'UTF-8');
-    $dompdf->setPaper('A4', 'landscape');
+    $dompdf->setPaper([0, 0, 612, 936], 'portrait');   // LONG BOND PAPER 8.5" x 13", portrait
     $dompdf->render();
     return $dompdf->output();
 }

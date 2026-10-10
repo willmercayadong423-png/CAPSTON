@@ -1,6 +1,6 @@
 <?php
 /* ═══════════════════════════════════════════════════════════════════
-   HEHMS — Shared inline SVG icon system  (phpLogics/icons.php)
+   HEHMHS — Shared inline SVG icon system  (phpLogics/icons.php)
    ───────────────────────────────────────────────────────────────────
    Replaces emoji glyphs across every page with crisp, self-contained
    inline SVGs (Feather/Lucide-style: 24×24 viewBox, 2px stroke,

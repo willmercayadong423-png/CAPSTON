@@ -25,8 +25,8 @@ try {
     switch ($action) {
 
         case 'add':
-            $title   = trim($_POST['title'] ?? '');
-            $message = trim($_POST['message'] ?? '');
+            $title   = db_utf8(trim($_POST['title'] ?? ''));
+            $message = db_utf8(trim($_POST['message'] ?? ''));
 
             if ($title === '' || $message === '') {
                 echo json_encode(['success' => false, 'message' => 'Title and message are required.']);

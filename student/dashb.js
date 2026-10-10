@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════
-   HEHMS — Student Dashboard JS  (dashb.js)
+   HEHMHS — Student Dashboard JS  (dashb.js)
    ═══════════════════════════════════════════════════ */
 
 /* ── Sidebar view switcher ── */
@@ -96,6 +96,16 @@ function proceedToPayment() {
 function submitRequest() {
     var purpose = document.getElementById('purpose-input');
     var idPhoto = document.getElementById('new-id-input');
+
+    // Document type first — the card picker writes a hidden input, so an
+    // empty value otherwise only fails server-side AFTER the upload.
+    var docInput = document.getElementById('selected-document-input');
+    if (!docInput || !docInput.value) {
+        alert('Please choose the document you want to request.');
+        var firstCard = document.querySelector('.doc-pick-card, .rf-doc-card, #doc-cards a');
+        if (firstCard) firstCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        return;
+    }
 
     if (!purpose.value) {
         alert('Please select the purpose of your request.');

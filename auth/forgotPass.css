@@ -82,6 +82,10 @@ body {
     max-width: 420px;
     overflow: hidden;
     border: 1px solid var(--card-border, #d6e4c8);
+    /* margin:auto centers the card inside the flex .page-center BUT — unlike
+       align-items:center — it never clips the top when the card is taller
+       than the viewport (short landscape screens): the page just scrolls. */
+    margin: auto;
 }
 
 .card-header {
@@ -156,10 +160,10 @@ body {
 
 .input-wrap input {
     width: 100%;
-    padding: 11px 14px 11px 8px;
+    padding: 12px 14px 12px 8px;
     border: 1.5px solid var(--input-border, #c5d9b0);
     border-radius: 8px;
-    font-size: 0.93rem;
+    font-size: 16px;   /* ≥16px keeps iOS Safari from auto-zooming on focus */
     color: var(--input-text, #222);
     background: var(--input-bg, #fafcf8);
     font-family: 'DM Sans', sans-serif;
@@ -257,3 +261,13 @@ body {
     margin-top: 2px;
 }
 .svgic { display: inline-block; vertical-align: -.18em; flex-shrink: 0; }
+
+/* ── Responsive ── */
+@media (max-width: 380px) {
+    /* First/Last name side-by-side is too cramped below 380px (97px fields
+       on a 320px phone) — stack them. */
+    .name-row { grid-template-columns: 1fr; }
+
+    .card-header, .card-body { padding-left: 22px; padding-right: 22px; }
+    .header { padding-left: 18px; padding-right: 18px; }
+}

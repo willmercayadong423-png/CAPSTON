@@ -1,33 +1,50 @@
 <?php
+/* ── HEHMHS — Serve a profile photo through authentication ───────────
+ * uploads/profile_photos/ is blocked from direct web access (personal
+ * data). This endpoint is the only way to view a profile photo:
+ *
+ *   GET download_profile.php            → the logged-in user's OWN photo
+ *   GET download_profile.php?user_id=N  → that user's photo
+ *                                          (Registrar / Admin only —
+ *                                          staff need it for the request
+ *                                          tables and account records)
+ *
+ * Students may only ever fetch their own photo.
+ * ───────────────────────────────────────────────────────────────────── */
 require(__DIR__ . "/auth.php");
 require_once __DIR__ . '/../database/db.php';
 
-if (strtolower($_SESSION['role']) !== 'student') {
+$role = strtolower($_SESSION['role'] ?? '');
+if ($role !== 'student' && $role !== 'registrar' && $role !== 'admin') {
     http_response_code(403);
     exit('Forbidden');
 }
 
-$student_id = $_SESSION['user_id'];
-$field      = $_GET['field'] ?? '';
-$allowed    = ['profile_photo'];
-
-if (!in_array($field, $allowed, true)) {
-    http_response_code(400);
-    exit('Invalid field');
+$viewerId = (int)$_SESSION['user_id'];
+$targetId = (int)($_GET['user_id'] ?? 0);
+if ($targetId === 0) {
+    $targetId = $viewerId;                       // default: own photo
 }
 
-$stmt = $conn->prepare("SELECT $field AS filepath FROM users WHERE id = ?");
-$stmt->bind_param("i", $student_id);
+// Students are limited to their OWN photo
+if ($role === 'student' && $targetId !== $viewerId) {
+    http_response_code(403);
+    exit('Forbidden');
+}
+
+$stmt = $conn->prepare("SELECT profile_photo FROM users WHERE id = ?");
+$stmt->bind_param("i", $targetId);
 $stmt->execute();
 $row = $stmt->get_result()->fetch_assoc();
+$stmt->close();
 
-// Check the row BEFORE touching it (fetch_assoc returns null when no row)
-if (!$row || empty($row['filepath'])) {
+if (!$row || empty($row['profile_photo'])) {
     http_response_code(404);
     exit('Not found');
 }
 
-$path = __DIR__ . '/../' . $row['filepath'];
+// DB paths are web-root-relative ("uploads/...") — resolve to filesystem
+$path = dirname(__DIR__) . '/' . ltrim($row['profile_photo'], '/');
 
 if (!file_exists($path)) {
     http_response_code(404);
@@ -37,6 +54,7 @@ if (!file_exists($path)) {
 $mime = mime_content_type($path);
 header('Content-Type: ' . $mime);
 header('Content-Disposition: inline; filename="' . basename($path) . '"');
+header('Cache-Control: private, max-age=300');
 header('X-Content-Type-Options: nosniff');
 readfile($path);
 exit;

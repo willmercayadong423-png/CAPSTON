@@ -1,5 +1,5 @@
 <?php
-/* ── HEHMS site configuration ────────────────────────────────────────
+/* ── HEHMHS site configuration ────────────────────────────────────────
  * Loads admin-managed settings (logo, theme color) and provides helpers
  * usable from any page, at any folder depth:
  *   site_settings()   – cached key => value array
@@ -163,17 +163,11 @@ if (!function_exists('site_settings')) {
         $accent = $theme['accent'];
         $accentLight = $theme['accent_light'];
 
-        $out = '';
-        if ($theme['font_import'] !== '') {
-            $out .= "@import url('{$theme['font_import']}');";
-        }
-        $out .= ":root{--green-mid:{$color};--green-dark:{$dark};"
-             . "--green-light:{$light};--green-pale:{$pale};"
-             . "--gold:{$accent};--gold-light:{$accentLight};--radius:{$theme['radius']};"
+        $out = ':root{--green-mid:' . $color . ';--green-dark:' . $dark . ';'
+             . '--green-light:' . $light . ';--green-pale:' . $pale . ';'
+             . '--gold:' . $accent . ';--gold-light:' . $accentLight . ';--radius:' . $theme['radius'] . ';'
              . ($theme['extra'] ?? '')
-             . "}";
-
-        // Font + corner-radius skin (named themes only — classic keeps built-ins)
+             . '}';
         if ($theme['font_head'] !== '') {
             $fh = $theme['font_head'];
             $fb = $theme['font_body'];
@@ -183,6 +177,16 @@ if (!function_exists('site_settings')) {
                  . "button,.btn,.save-btn,.doc-act,.rf-group input,.rf-group textarea,.chip,.search{border-radius:calc(var(--radius) - 4px) !important;}";
         }
 
-        return "<style>{$out}</style>";
+        /* Named design themes pull their display font from Google Fonts —
+           loaded NON-BLOCKING (media=print → all on load). When offline
+           the theme falls back to system fonts instantly instead of
+           freezing the page on a request that can never complete. */
+        $fontLink = '';
+        if ($theme['font_import'] !== '') {
+            $fontLink = '<link rel="stylesheet" media="print" onload="this.media=\'all\'"'
+                      . ' href="' . htmlspecialchars($theme['font_import'], ENT_QUOTES) . '">';
+        }
+
+        return $fontLink . "<style>{$out}</style>";
     }
 }

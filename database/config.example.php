@@ -1,5 +1,5 @@
 <?php
-/* ── HEHMS central configuration — TEMPLATE ────────────────────────
+/* ── HEHMHS central configuration — TEMPLATE ────────────────────────
  * Copy this file to config.php and fill in the real values:
  *     cp config.example.php config.php
  * config.php is gitignored — real credentials must NEVER be committed.
@@ -24,4 +24,15 @@ define('SMTP_PASS',   'GENERATED_APP_PASSWORD');
 define('SMTP_PORT',   587);
 define('SMTP_SECURE', 'tls'); // STARTTLS
 define('SMTP_FROM',   'you@gmail.com');
-define('SMTP_FROM_NAME', 'HEHMS');
+define('SMTP_FROM_NAME', 'HEHMHS');
+
+// ── Certificate verification QR codes ──
+// Secret behind the unguessable per-request verification codes printed as
+// QR on every e-certificate (verify.php checks against it). Generate one:
+//   php -r "echo bin2hex(random_bytes(32));"
+// Changing it invalidates ALL previously printed QR codes — set once, keep.
+define('VERIFICATION_SECRET', 'GENERATE_64_HEX_CHARS');
+
+// ── Mail sending ──
+// Set to false to silence ALL outgoing email (testing / quota protection).
+define('MAIL_ENABLED', true);

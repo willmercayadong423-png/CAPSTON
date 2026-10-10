@@ -1,15 +1,21 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════
-     HEHMS e-CERTIFICATE TEMPLATE  (phpLogics/certificate_template.html)
-     Design: SIMPLE / CLASSIC — plain white, centered letterhead, no
-     decorative borders, plain black serif text.
-     ═══════════════════════════════════════════════════════════════════
-     EDIT THIS FILE to change the certificate LOOK:
-       • logo placement, fonts, colors, borders
-       • letterhead text (Region, Division, School name, address)
-       • text sizes and positioning
+     HEHMHS e-CERTIFICATE TEMPLATE  (phpLogics/certificate_template.html)
+     ───────────────────────────────────────────────────────────────────
+     Layout + wording follow the school's OFFICIAL printed certificates
+     (Good_Moral.jpg / Graduation.jpg / Enrollment.jpg):
 
-     HOW:
+       • Letterhead : Republic of the Philippines / DepEd / REGION III -
+                      CENTRAL LUZON / Schools Division Office of Nueva
+                      Ecija / school name + address line
+       • Page       : LONG BOND PAPER (8.5" x 13"), portrait
+       • Titles     : "CERTIFICATION" centered above "To Whom It May
+                      Concern:" (Good Moral / Enrollment); Graduation
+                      prints "CERTIFICATE OF GRADUATION" (no salutation)
+       • Footer     : contact strip (address · telephone · email · page)
+       • Signature  : school principal block (left) + Reference No. (right)
+
+     HOW TO EDIT THE LOOK:
        1. Open this file in a text editor (VS Code / Notepad++)
        2. Edit the CSS below the "STYLE" banner and/or the HTML below
           the "LAYOUT" banner
@@ -18,10 +24,13 @@
 
      RULES — do not remove these tokens (the system fills them in):
        {{LOGO_IMG}}       → the school logo <img> tag
-       {{TITLE}}          → certificate title (e.g. CERTIFICATE OF GOOD MORAL)
-       {{BODY}}           → certificate body text (name, SY, etc. inside)
+       {{QR_IMG}}         → verification QR code <img> (above Reference No.)
+       {{TITLE}}          → certificate title block (EMPTY for letter-style
+                            certificates — Good Moral / Enrollment)
+       {{SALUTATION}}     → "To Whom It May Concern:" (empty when a title
+                            is shown, e.g. Graduation)
+       {{BODY}}           → certificate body text (name, SY, LRN, … inside)
        {{REMARKS}}        → optional remarks block (may be empty)
-       {{ISSUED_LINE}}    → "Given this 24th of June 2022, at ..."
        {{REQ_NO}}         → request reference number
        {{OFFICER_NAME}}   → signatory name
        {{OFFICER_TITLE}}  → signatory position
@@ -32,61 +41,66 @@
 
 <!-- ═════════════════════════ STYLE — edit freely ═════════════════════ -->
 <style>
-    @page { size: 297mm 210mm; margin: 0; }   /* page = A4 LANDSCAPE */
+    @page { size: 8.5in 13in; margin: 0; }   /* LONG BOND PAPER (8.5" x 13"), PORTRAIT */
 
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: "DejaVu Serif", serif; color: #000; }
 
-    .page { width: 297mm; height: 210mm; position: relative; background: #ffffff; }
+    .page { width: 215.9mm; height: 330.2mm; position: relative; background: #ffffff; }
 
-    /* Border frame — inset so nothing clips at the page edge.
-         Double line → change `double` to `solid` for a single line. */
+    /* Border frame — inset so nothing clips at the page edge. */
     .b-frame { position: absolute; top: 3mm; left: 3mm; right: 3mm; bottom: 3mm; border: 3px double #000; }
 
-    /* Content area — everything sits inside this box.
-       Increase `top` to push content down; `left/right` to narrow it. */
-    .content { position: absolute; top: 14mm; left: 30mm; right: 30mm; bottom: 14mm; }
+    /* Content area — everything sits inside this box. */
+    .content { position: absolute; top: 14mm; left: 25mm; right: 25mm; bottom: 12mm; }
 
-    /* ── Letterhead — logo CENTERED above the text, all lines centered ──
-         Logo bigger/smaller: change the width/height (keep equal).
-         Logo back on the left: use
-           .cert-logo { position:absolute; left:0; top:2mm; width:19mm; height:19mm; } */
+    /* ── Letterhead (official DepEd header, logo centered above) ── */
     .head-wrap { text-align: center; }
-    .cert-logo { display: block; margin: 0 auto 2.5mm; width: 18mm; height: 18mm; }
-    .gov  { font-size: 10pt; }
-    .dept { font-size: 11pt; font-weight: bold; }
-    .region { font-size: 10pt; }
-    .division { font-size: 10pt; font-weight: bold; }
-    .district { font-size: 10pt; }
-    .school { font-size: 13.5pt; font-weight: bold; margin-top: 1mm; }
-    .addr { font-size: 9.5pt; font-style: italic; margin-top: .8mm; }
+    .cert-logo { display: block; margin: 0 auto 2mm; width: 17mm; height: 17mm; }
+    .gov       { font-size: 10pt; }
+    .dept      { font-size: 11pt; font-weight: bold; }
+    .region    { font-size: 10pt; font-weight: bold; }
+    .division  { font-size: 10pt; font-weight: bold; }
+    .school    { font-size: 13.5pt; font-weight: bold; margin-top: .8mm; }
+    .addr      { font-size: 10pt; margin-top: .5mm; }
+    .head-rule { border-top: 1px solid #000; margin: 2.5mm auto 0; width: 100%; }
 
-    /* ── Certificate title ── */
-    .cert-title { font-size: 16pt; font-weight: bold; margin-top: 7mm; letter-spacing: 2px; text-align: center; text-decoration: underline; }
+    /* ── Certificate title — centered above the salutation/body.
+         Letter-style certificates print "CERTIFICATION"; Graduation prints
+         "CERTIFICATE OF GRADUATION". */
+    .cert-title { font-size: 15pt; font-weight: bold; margin-top: 8mm; letter-spacing: 3px; text-align: center; text-decoration: underline; }
 
     /* ── Body ── */
-    .cert-to-whom { font-size: 10.5pt; margin-top: 6mm; text-align: left; }
-    .cert-body { font-size: 10.5pt; line-height: 1.8; text-align: justify; margin-top: 4mm; }
+    .cert-to-whom { font-size: 11pt; margin-top: 10mm; }
+    .cert-body { font-size: 11pt; line-height: 2.0; text-align: justify; margin-top: 5mm; }
+    .cert-body strong { font-weight: bold; }   /* **bold** syntax in the body */
     .cert-name { font-size: 12.5pt; font-weight: bold; }
-    .cert-remarks { font-size: 10pt; line-height: 1.7; text-align: justify; margin-top: 4mm; font-style: italic; }
+    .cert-remarks { font-size: 10pt; line-height: 1.7; text-align: justify; margin-top: 5mm; font-style: italic; }
 
-    /* ── Footer — anchored from the TOP (dompdf mishandles bottom-anchored
-         absolute boxes and pushes them off-page). The "Given this…" date line
-         was removed: the issue date already appears inside the body text.
-         Signature sits LEFT, Reference No. sits RIGHT. ── */
-    .foot { position: absolute; top: 150mm; left: 0; right: 0; }
+    /* ── Signature — principal block LEFT, Reference No. RIGHT.
+         (Anchored from the TOP: dompdf mishandles bottom-anchored
+         absolute boxes and pushes them off-page.) ── */
+    .foot { position: absolute; top: 225mm; left: 0; right: 0; }
     .foot table { width: 100%; border-collapse: collapse; }
     .foot td { vertical-align: top; padding: 0; }
-    .td-sig { width: 45%; text-align: center; }
-    .td-ref { width: 55%; text-align: right; font-size: 9pt; color: #555; }
-    .sig-line { width: 65mm; border-top: 1px solid #000; margin: 0 auto 2mm; }
+    .td-sig { width: 48%; text-align: center; }
+    .td-ref { width: 52%; text-align: right; font-size: 9pt; color: #555; }
+    /* Verification QR — own line, right-aligned, ABOVE the Reference No.
+       (kept INLINE on purpose: dompdf ignores display:block + margin:auto
+       inside table cells, which put the QR to the LEFT of the text) */
+    .cert-qr { width: 22mm; height: 22mm; border: 0; }
+    .qr-hint { font-size: 7.5pt; color: #555; }
+    .sig-line { width: 68mm; border-top: 1px solid #000; margin: 0 auto 2mm; }
     .sig-name { font-size: 10.5pt; font-weight: bold; color: #000; }
     .sig-title { font-size: 9.5pt; color: #000; }
-    .ref-note { position: absolute; top: 176mm; left: 0; right: 0; text-align: center; font-size: 7pt; color: #999; }
 
-    /* Border is drawn by .b-frame above — edit its border rule to restyle:
-       Single thin:  border: 1px solid #000;
-       Single bold:  border: 2px solid #000;   */
+    /* ── Official contact strip (bottom of the printed certificates) ── */
+    .contact { position: absolute; top: 288mm; left: 0; right: 0;
+               border-top: 1px solid #000; padding-top: 2mm;
+               text-align: center; font-size: 8.2pt; color: #000; line-height: 1.6; }
+
+    /* System note — tiny, below the contact strip */
+    .ref-note { position: absolute; top: 306mm; left: 0; right: 0; text-align: center; font-size: 7pt; color: #999; }
 </style>
 </head>
 
@@ -96,29 +110,31 @@
         <div class="b-frame"></div>
         <div class="content">
 
-            <!-- Letterhead — edit the text lines directly if ever needed -->
+            <!-- Letterhead — official DepEd header (matches the printed
+                 certificates) -->
             <div class="head-wrap">
                 {{LOGO_IMG}}
                 <div class="gov">Republic of the Philippines</div>
                 <div class="dept">Department of Education</div>
-                <div class="region">Region III</div>
-                <div class="division">Schools Division of Nueva Ecija</div>
-                <div class="district">Laur 3rd District</div>
+                <div class="region">REGION III - CENTRAL LUZON</div>
+                <div class="division">Schools Division Office of Nueva Ecija</div>
                 <div class="school">HILARIO E. HERMOSA MEMORIAL HIGH SCHOOL</div>
-                <div class="addr">Siclong, Laur, Nueva Ecija</div>
+                <div class="addr">Kamagong II, Siclong, Laur, Nueva Ecija 3129</div>
+                <div class="head-rule"></div>
             </div>
 
-            <!-- Title -->
-            <div class="cert-title">{{TITLE}}</div>
+            <!-- Title (Graduation) — empty for letter-style certificates -->
+            {{TITLE}}
+
+            <!-- Salutation (Good Moral / Enrollment) -->
+            {{SALUTATION}}
 
             <!-- Body -->
-            <div class="cert-to-whom">To whom it may concern:</div>
             <div class="cert-body">{{BODY}}</div>
-            
+
             {{REMARKS}}
 
-            <!-- Footer: signature LEFT, Reference No. RIGHT (no "Given this…"
-                 line — the date is already in the body text) -->
+            <!-- Signature: principal block LEFT, Reference No. RIGHT -->
             <div class="foot">
                 <table>
                     <tr>
@@ -128,13 +144,26 @@
                             <div class="sig-title">{{OFFICER_TITLE}}</div>
                         </td>
                         <td class="td-ref">
-                            Reference No.: {{REQ_NO}}
+                            {{QR_IMG}}<br>
+                            Reference No.: {{REQ_NO}}<br>
+                            <span class="qr-hint">Scan to verify this certificate</span>
                         </td>
                     </tr>
                 </table>
             </div>
-            <!-- System note — direct child of .content (anchors to content, not to .foot) -->
-            <div class="ref-note">This certificate is system-generated by the HEHMS Credential Request &amp; Tracking System.</div>
+
+            <!-- Official contact strip (as printed on the certificates).
+                 ASCII "|" separators — HTML entities like &ndash;/&bull;
+                 rendered as mojibake ("â??") in the PDF. -->
+            <div class="contact">
+                Address: Kamagong II, Brgy. Siclong, Laur, Nueva Ecija &nbsp;&nbsp;|&nbsp;&nbsp;
+                Telephone No.: 09171536379<br>
+                Email: 300810@deped.gov.ph &nbsp;&nbsp;|&nbsp;&nbsp;
+                Facebook Page: https://web.facebook.com/PusongHilario
+            </div>
+
+            <!-- System note -->
+            <div class="ref-note">This certificate is system-generated by the HEHMHS Credential Request &amp; Tracking System.</div>
 
         </div>
     </div>

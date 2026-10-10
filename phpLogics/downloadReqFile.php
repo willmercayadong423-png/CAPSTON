@@ -1,5 +1,5 @@
 <?php
-/* ── HEHMS — Registrar/Admin: fetch a request's attached files ─────────
+/* ── HEHMHS — Registrar/Admin: fetch a request's attached files ─────────
  * Serves requirement files (student valid IDs) and e-certificates that
  * are blocked from direct /uploads/ access by .htaccess.
  *

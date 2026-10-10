@@ -5,6 +5,13 @@ require __DIR__ . '/../phpLogics/site_config.php';
 require_once __DIR__ . '/../phpLogics/audit.php';
 require_once __DIR__ . '/../phpLogics/icons.php';
 
+// ── Security headers (this page is reachable pre-login) ───────────
+header("X-Content-Type-Options: nosniff");
+header("X-Frame-Options: DENY");
+header("Referrer-Policy: strict-origin-when-cross-origin");
+header("Cache-Control: private, no-cache, no-store, must-revalidate, max-age=0");
+header("Pragma: no-cache");
+
 use PHPMailer\PHPMailer\PHPMailer;
 use PHPMailer\PHPMailer\Exception;
 
@@ -41,6 +48,13 @@ function generateTempPassword(int $length = 10): string
 }
 
 function sendCredentialsEmail($email, $full_name, $student_id, $temp_password) {
+    // Global kill-switch — see config.php (MAIL_ENABLED). Throwing keeps the
+    // caller's contract: the password is only persisted after a SUCCESSFUL
+    // send, so mail-off can never lock an account with an unknown password.
+    if (defined('MAIL_ENABLED') && !MAIL_ENABLED) {
+        throw new Exception('Mail sending is disabled (MAIL_ENABLED=false)');
+    }
+
     $mail = new PHPMailer(true);
 
     $mail->isSMTP();
@@ -50,17 +64,18 @@ function sendCredentialsEmail($email, $full_name, $student_id, $temp_password) {
     $mail->Password   = SMTP_PASS;
     $mail->SMTPSecure = PHPMailer\PHPMailer\PHPMailer::ENCRYPTION_STARTTLS;
     $mail->Port       = SMTP_PORT;
+    $mail->Timeout    = 15;   // seconds — bound the worst-case stall when SMTP is slow/down
     $mail->CharSet    = 'UTF-8';
     $mail->Encoding   = 'base64';
 
     $mail->setFrom(SMTP_FROM, SMTP_FROM_NAME);
     $mail->addAddress($email, $full_name);
     $mail->isHTML(true);
-    $mail->Subject = 'Your HEHMS Temporary Password';
+    $mail->Subject = 'Your HEHMHS Temporary Password';
     $mail->Body = "
         <div style='font-family: Arial, sans-serif; max-width: 520px; margin: auto; border: 1px solid #ddd; border-radius: 8px; overflow: hidden;'>
             <div style='background: #4a6741; padding: 24px; text-align: center;'>
-                <h2 style='color: #fff; margin: 0;'>HEHMS Credentials</h2>
+                <h2 style='color: #fff; margin: 0;'>HEHMHS Credentials</h2>
             </div>
             <div style='padding: 28px;'>
                 <p style='color: #333;'>Hello, <strong>{$full_name}</strong>!</p>
@@ -83,7 +98,7 @@ function sendCredentialsEmail($email, $full_name, $student_id, $temp_password) {
                 <p style='color: #888; font-size: 13px;'>If you did not request this, please contact your registrar immediately.</p>
             </div>
             <div style='background: #f5f7fa; padding: 14px; text-align: center;'>
-                <p style='color: #aaa; font-size: 12px; margin: 0;'>HEHMS Student Records System &mdash; Confidential</p>
+                <p style='color: #aaa; font-size: 12px; margin: 0;'>HEHMHS Student Records System &mdash; Confidential</p>
             </div>
         </div>
     ";
@@ -116,6 +131,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // Match against student_id, first_name, AND last_name
         // (date_of_birth was removed from the system)
         // Schema v5: student_id lives in student_profiles, role name in roles.
+        // STUDENT accounts only — staff (registrar/admin) must never be
+        // resettable through this self-service flow, even if a stray
+        // student_profiles row ever existed for them.
         $stmt = $conn->prepare("
             SELECT u.id, u.first_name, u.last_name, u.email,
                    sp.student_id, r.role_name AS role
@@ -123,6 +141,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             LEFT JOIN student_profiles sp ON sp.user_id = u.id
             LEFT JOIN roles r            ON r.role_id  = u.role_id
             WHERE sp.student_id    = ?
+              AND LOWER(r.role_name) = 'student'
               AND LOWER(u.first_name) = LOWER(?)
               AND LOWER(u.last_name)  = LOWER(?)
               AND u.status = 'active'
@@ -194,14 +213,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Forgot Credentials — HEHMS</title>
+    <link rel="icon" type="image/png" href="../assets/img/Logo.png">
+    <title>Forgot Credentials — HEHMHS</title>
 
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <!-- Fonts are SELF-HOSTED (assets/fonts) — the page looks identical even offline.
+         (Google-hosted fonts used to make the whole site look broken without internet.) -->
+    <link rel="stylesheet" href="../assets/fonts/playfair-dmsans.css">
 
-    <link rel="stylesheet" href="mainPageCSS.css">
-    <link rel="stylesheet" href="forgotPass.css">
+    <link rel="stylesheet" href="mainPageCSS.css?v=4">
+    <link rel="stylesheet" href="forgotPass.css?v=2">
     <?php echo theme_head(); // admin-managed brand color ?>
 </head>
 <body>
@@ -307,5 +327,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         </div>
     </div>
 
+    <script src="../assets/js/offline-guard.js" defer></script>
 </body>
 </html>

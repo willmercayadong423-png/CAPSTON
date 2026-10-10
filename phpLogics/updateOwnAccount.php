@@ -20,8 +20,8 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !verifyCsrfToken()) {
 }
 
 $user_id     = (int)$_SESSION['user_id'];
-$first       = trim($_POST['first_name'] ?? '');
-$last        = trim($_POST['last_name'] ?? '');
+$first       = db_utf8(trim($_POST['first_name'] ?? ''));
+$last        = db_utf8(trim($_POST['last_name'] ?? ''));
 $email       = filter_var(trim($_POST['email'] ?? ''), FILTER_VALIDATE_EMAIL);
 $contact     = trim($_POST['contact'] ?? '');
 $newPassword = $_POST['password'] ?? '';
@@ -39,8 +39,8 @@ if ($contact !== '' && !preg_match('/^[0-9]{7,11}$/', $contact)) {
     echo json_encode(['success' => false, 'message' => 'Contact number must be 7–11 digits, numbers only.']);
     exit;
 }
-if ($newPassword !== '' && strlen($newPassword) < 5) {
-    echo json_encode(['success' => false, 'message' => 'New password must be at least 5 characters.']);
+if ($newPassword !== '' && strlen($newPassword) < 8) {
+    echo json_encode(['success' => false, 'message' => 'New password must be at least 8 characters.']);
     exit;
 }
 
@@ -114,10 +114,9 @@ if (isset($_FILES['profile_photo']) && $_FILES['profile_photo']['error'] === UPL
 
     $filename = 'staff_' . $user_id . '_' . time() . '_' . rand(100, 999) . '.' . $ext;
     if (move_uploaded_file($file['tmp_name'], $fs_dir . $filename)) {
-        if (!empty($me['profile_photo'])) {
-            $oldFs = dirname(__DIR__) . '/' . ltrim($me['profile_photo'], '/');
-            if (file_exists($oldFs)) unlink($oldFs);
-        }
+        // NOTE: the previous photo is deleted only after the DB update
+        // succeeds (below) — never before, or a failed update would
+        // leave a dangling photo path in the database.
         $new_photo = 'uploads/profile_photos/' . $filename;
     } else {
         echo json_encode(['success' => false, 'message' => 'Failed to save the photo. Please try again.']);
@@ -144,16 +143,28 @@ if ($newPassword !== '') {
     $upd->bind_param("sssssi", $first, $last, $email, $contact, $new_photo, $user_id);
 }
 
-if ($upd->execute()) {
-    $_SESSION['email'] = $email; // keep session in sync with the new email
+try {
+    if ($upd->execute()) {
+        $_SESSION['email'] = $email; // keep session in sync with the new email
 
-    // ── Audit: user updated their own profile ──
-    audit_log($conn, 'PROFILE_UPDATED', 'user', (string)$user_id,
-        'Own profile updated' . ($newPassword !== '' ? ' (password changed)' : ''));
+        // ── Remove the previous photo only now that the DB points at the new one ──
+        $oldPhoto = (string)($me['profile_photo'] ?? '');
+        if ($oldPhoto !== '' && $new_photo !== $oldPhoto) {
+            $oldFs = dirname(__DIR__) . '/' . ltrim($oldPhoto, '/');
+            if (file_exists($oldFs)) unlink($oldFs);
+        }
 
-    echo json_encode(['success' => true]);
-} else {
-    error_log('updateOwnAccount error: ' . $upd->error);
+        // ── Audit: user updated their own profile ──
+        audit_log($conn, 'PROFILE_UPDATED', 'user', (string)$user_id,
+            'Own profile updated' . ($newPassword !== '' ? ' (password changed)' : ''));
+
+        echo json_encode(['success' => true]);
+    } else {
+        error_log('updateOwnAccount error: ' . $upd->error);
+        echo json_encode(['success' => false, 'message' => 'A database error occurred. Please try again.']);
+    }
+    $upd->close();
+} catch (Throwable $e) {
+    error_log('updateOwnAccount exception: ' . $e->getMessage());
     echo json_encode(['success' => false, 'message' => 'A database error occurred. Please try again.']);
 }
-$upd->close();

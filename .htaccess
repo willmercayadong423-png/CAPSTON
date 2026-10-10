@@ -26,13 +26,12 @@ RewriteRule ^ error.php [L]
 # Branded error pages for statuses the rewrite above can't catch
 # (denied files/folders, script errors).
 #
-# ⚠ DEPLOYMENT STEP — these paths include the project folder name:
-#   1. If the folder is renamed (recommended: deploy as `hehmhs`, no
-#      space), update the paths below to match.
-#   2. If deploying to the domain root, change them to /error.php.
-ErrorDocument 403 /HEHMHS%20Portal/error.php
-ErrorDocument 404 /HEHMHS%20Portal/error.php
-ErrorDocument 500 /HEHMHS%20Portal/error.php
+# Site is deployed at the DOMAIN ROOT on Hostinger (hehmhs-portal.site)
+# so the error page is reached directly at /error.php.
+# (For subfolder deploys, prefix with the folder path instead.)
+ErrorDocument 403 /error.php
+ErrorDocument 404 /error.php
+ErrorDocument 500 /error.php
 
 Options -Indexes
 

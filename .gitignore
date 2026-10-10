@@ -10,5 +10,10 @@ uploads/
 vendor/
 composer.phar
 cert_preview_sample.pdf
+php_diag2.php
+php_check_files.php
+php_debug_photo.php
+php_fix_output.php
+uploads_deploy.zip
 .idea/
 .vscode/

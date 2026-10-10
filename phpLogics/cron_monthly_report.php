@@ -10,11 +10,11 @@
  * HOW TO SCHEDULE (Windows / Laragon — recommended: daily at 00:30):
  *   Option A — Task Scheduler GUI:
  *     Program:   C:\laragon\bin\php\php-8.3.33-Win32-vs16-x64\php.exe
- *     Arguments: "C:\laragon\www\NEW UPCAP\phpLogics\cron_monthly_report.php"
+ *     Arguments: "C:\laragon\www\HEHMHS Portal\phpLogics\cron_monthly_report.php"
  *     Trigger:   Daily, 00:30
  *   Option B — one-liner (Admin Command Prompt):
  *     schtasks /create /tn "HEHMHS Monthly Report" /sc daily /st 00:30 ^
- *       /tr "C:\laragon\bin\php\php-8.3.33-Win32-vs16-x64\php.exe \"C:\laragon\www\NEW UPCAP\phpLogics\cron_monthly_report.php\""
+ *       /tr "C:\laragon\bin\php\php-8.3.33-Win32-vs16-x64\php.exe \"C:\laragon\www\HEHMHS Portal\phpLogics\cron_monthly_report.php\""
  *
  * Linux deployment equivalent (crontab):
  *   30 0 * * * /usr/bin/php /var/www/hehmhs/phpLogics/cron_monthly_report.php

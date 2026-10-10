@@ -170,7 +170,7 @@ INSERT INTO `roles` (`role_id`, `role_name`) VALUES
 -- Default accounts (bcrypt hashes; change these on any real deployment)
 INSERT INTO `users` (`id`, `role_id`, `first_name`, `last_name`, `status`, `email`, `contact`, `password`) VALUES
 (1, 2, 'Juanito', 'Bunao',     'active', 'registrar@hehmhs.edu.ph', '09170000001', '$2y$10$67bmpeQ91MNy4c.xx7MIUO49M38fqpcrUCk81V.1xVsBF0LZWsCfK'),  -- Registrar@123
-(2, 3, 'Juanito', 'Bunao',     'active', 'admin@hehmhs.edu.ph',     '09170000002', '$2y$10$vz/hE3MinRWOhHJyST8KE.8m6VZBPbZTNl1YuA34FPQyF7xPmZSc.'),  -- Admin@123
+(2, 3, 'Juanito', 'Bunao',     'active', 'hehmhsadmin@gmail.com',  '09170000002', '$2y$10$vz/hE3MinRWOhHJyST8KE.8m6VZBPbZTNl1YuA34FPQyF7xPmZSc.'),  -- Admin@123
 (3, 1, 'Juan',    'Dela Cruz', 'active', 'juan@hehmhs.edu.ph',      '09123456789', '$2y$10$FfMQCfUH54jmNE4J1kz/2Oh4b6IDNMuKRuHlhAUT25rZRmU.fOHAO'); -- Student@123
 
 -- Demo student's academic profile (school number 2026-9001)
@@ -191,7 +191,7 @@ INSERT INTO `site_settings` (`setting_key`, `setting_value`) VALUES
 ('theme_color',           '#6b8f3a'),
 ('design_theme',          'classic'),
 ('office_hours',          'Monday to Friday, 8:00 AM – 4:00 PM'),
-('contact_email',         'registrar@hehmhs.edu.ph'),
+('contact_email',         'hehmhsadmin@gmail.com'),
 ('contact_phone',         '(044) 123-4567'),
 ('contact_location',      'Hilario E. Hermosa Memorial High School, Siclong, Laur, Nueva Ecija'),
 ('document_types_seeded', '1');

@@ -18,7 +18,7 @@ Everything the panel needs for the database side of your system.
 | Login | Password | Role |
 |---|---|---|
 | `registrar@hehmhs.edu.ph` | `Registrar@123` | Registrar |
-| `admin@hehmhs.edu.ph` | `Admin@123` | Admin |
+| `hehmhsadmin@gmail.com` | `Admin@123` | Admin |
 | `juan@hehmhs.edu.ph` (Student ID `2026-9001`) | `Student@123` | Student (demo) |
 
 > ⚠️ Change these on any real deployment.
